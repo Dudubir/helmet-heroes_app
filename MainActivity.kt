@@ -2,6 +2,7 @@ package com.gamewrap.app
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.graphics.Color
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.KeyEvent
@@ -20,13 +21,15 @@ class MainActivity : Activity() {
     }
 
     private lateinit var rootLayout: FrameLayout
-    private lateinit var webView: WebView
+    private lateinit var gameWebView: WebView
+    private lateinit var controllerWebView: WebView
 
-    private var gameFullscreen = false
+    private var fullscreenView: View? = null
+    private var fullscreenCallback: WebChromeClient.CustomViewCallback? = null
 
-    // ============================================================
-    // WEB CHROME CLIENT
-    // ============================================================
+    // ================================================================
+    // FULLSCREEN HANDLER
+    // ================================================================
 
     private val chromeClient = object : WebChromeClient() {
 
@@ -35,46 +38,80 @@ class MainActivity : Activity() {
             callback: WebChromeClient.CustomViewCallback?
         ) {
 
-            /*
-             * IMPORTANT:
-             *
-             * We deliberately DO NOT put the customView over
-             * the WebView.
-             *
-             * Doing that makes the controller disappear.
-             *
-             * Instead, we keep the WebView itself visible and
-             * make it occupy the complete screen.
-             */
+            if (view == null) {
+                callback?.onCustomViewHidden()
+                return
+            }
 
-            gameFullscreen = true
+            // Remove previous fullscreen view if one somehow remains.
+            fullscreenView?.let {
+                rootLayout.removeView(it)
+            }
 
-            enterFullscreenMode()
+            fullscreenView = view
+            fullscreenCallback = callback
 
-            webView.requestFocus()
+            // --------------------------------------------------------
+            // Put the actual Helmet Heroes fullscreen view into our
+            // root layout.
+            // --------------------------------------------------------
 
-            /*
-             * Tell Chrome that we handled fullscreen.
-             *
-             * We don't add the supplied customView because
-             * the controller must remain over the game.
-             */
-            callback?.onCustomViewHidden()
+            val fullscreenParams =
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+
+            rootLayout.addView(
+                view,
+                0,
+                fullscreenParams
+            )
+
+            // Normal game WebView is behind the fullscreen view.
+            gameWebView.visibility = View.GONE
+
+            // --------------------------------------------------------
+            // IMPORTANT:
+            // Controller WebView stays LAST in the layout.
+            // Therefore it remains ABOVE fullscreen game view.
+            // --------------------------------------------------------
+
+            controllerWebView.visibility = View.VISIBLE
+            controllerWebView.bringToFront()
+
+            gameFullscreenMode()
+
+            view.isFocusable = true
+            view.isFocusableInTouchMode = true
+            view.requestFocus()
+
+            controllerWebView.bringToFront()
         }
 
         override fun onHideCustomView() {
 
-            gameFullscreen = false
+            fullscreenView?.let {
+                rootLayout.removeView(it)
+            }
 
-            exitFullscreenMode()
+            fullscreenView = null
+            fullscreenCallback = null
 
-            webView.requestFocus()
+            gameWebView.visibility = View.VISIBLE
+
+            controllerWebView.visibility = View.VISIBLE
+            controllerWebView.bringToFront()
+
+            normalGameMode()
+
+            gameWebView.requestFocus()
         }
     }
 
-    // ============================================================
-    // ANDROID KEYBOARD BRIDGE
-    // ============================================================
+    // ================================================================
+    // ANDROID CONTROLLER BRIDGE
+    // ================================================================
 
     inner class KeyBridge {
 
@@ -84,27 +121,30 @@ class MainActivity : Activity() {
             down: Boolean
         ) {
 
-            /*
-             * Special command from controller.js.
-             *
-             * This is used by the controller's Full button.
-             */
+            // --------------------------------------------------------
+            // Controller fullscreen button
+            // --------------------------------------------------------
+
             if (name == "__REQUEST_GAME_FULLSCREEN__") {
 
                 runOnUiThread {
 
-                    if (!gameFullscreen) {
+                    if (fullscreenView == null) {
 
-                        requestGameFullscreenFromAndroid()
+                        requestHelmetHeroesFullscreen()
 
                     } else {
 
-                        exitGameFullscreenFromAndroid()
+                        exitHelmetHeroesFullscreen()
                     }
                 }
 
                 return
             }
+
+            // --------------------------------------------------------
+            // Normal controller button
+            // --------------------------------------------------------
 
             val keyCode =
                 toKeyCode(name)
@@ -112,7 +152,7 @@ class MainActivity : Activity() {
 
             runOnUiThread {
 
-                sendRealKey(
+                sendGameKey(
                     keyCode,
                     down
                 )
@@ -120,22 +160,21 @@ class MainActivity : Activity() {
         }
     }
 
-    // ============================================================
-    // SEND REAL ANDROID KEY
-    // ============================================================
+    // ================================================================
+    // SEND KEY TO THE ACTUAL GAME
+    // ================================================================
 
-    private fun sendRealKey(
+    private fun sendGameKey(
         keyCode: Int,
         down: Boolean
     ) {
 
-        /*
-         * Keep the WebView as the keyboard target.
-         *
-         * This is important both in normal and fullscreen mode.
-         */
+        val target =
+            fullscreenView ?: gameWebView
 
-        webView.requestFocus()
+        target.isFocusable = true
+        target.isFocusableInTouchMode = true
+        target.requestFocus()
 
         val now =
             SystemClock.uptimeMillis()
@@ -157,26 +196,33 @@ class MainActivity : Activity() {
                 0
             )
 
-        /*
-         * First send the event through the WebView.
-         */
-        webView.dispatchKeyEvent(event)
+        // ------------------------------------------------------------
+        // FIRST: send real Android KeyEvent to the actual game view.
+        // ------------------------------------------------------------
 
-        /*
-         * Also inject a JavaScript event for games that listen
-         * specifically on window/document.
-         */
-        injectJavascriptKey(
-            keyCode,
-            down
-        )
+        target.dispatchKeyEvent(event)
+
+        // ------------------------------------------------------------
+        // SECOND: if fullscreen view is a WebView, also inject the
+        // keyboard event directly into that WebView.
+        // ------------------------------------------------------------
+
+        if (target is WebView) {
+
+            injectJavascriptKey(
+                target,
+                keyCode,
+                down
+            )
+        }
     }
 
-    // ============================================================
+    // ================================================================
     // JAVASCRIPT KEY FALLBACK
-    // ============================================================
+    // ================================================================
 
     private fun injectJavascriptKey(
+        targetWebView: WebView,
         keyCode: Int,
         down: Boolean
     ) {
@@ -238,7 +284,7 @@ class MainActivity : Activity() {
                 else -> return
             }
 
-        val code =
+        val jsCode =
             when (keyCode) {
 
                 in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z ->
@@ -283,56 +329,77 @@ class MainActivity : Activity() {
                 else -> ""
             }
 
+        val eventType =
+            if (down) {
+                "keydown"
+            } else {
+                "keyup"
+            }
+
         val js =
             """
             (function() {
+
                 try {
 
-                    var type =
-                        ${if (down) "'keydown'" else "'keyup'"};
-
-                    var ev =
-                        new KeyboardEvent(type, {
+                    var ev = new KeyboardEvent(
+                        '$eventType',
+                        {
                             key: ${jsKey.quoteJs()},
-                            code: ${code.quoteJs()},
+                            code: ${jsCode.quoteJs()},
                             bubbles: true,
                             cancelable: true
-                        });
+                        }
+                    );
 
                     try {
+
                         Object.defineProperty(
                             ev,
                             'keyCode',
-                            { get: function() { return $keyCode; } }
+                            {
+                                get: function() {
+                                    return $keyCode;
+                                }
+                            }
                         );
 
                         Object.defineProperty(
                             ev,
                             'which',
-                            { get: function() { return $keyCode; } }
+                            {
+                                get: function() {
+                                    return $keyCode;
+                                }
+                            }
                         );
+
                     } catch(e) {}
 
                     window.dispatchEvent(ev);
+
                     document.dispatchEvent(ev);
 
                     if (document.activeElement) {
+
                         document.activeElement.dispatchEvent(ev);
+
                     }
 
                 } catch(e) {}
+
             })();
             """.trimIndent()
 
-        webView.evaluateJavascript(
+        targetWebView.evaluateJavascript(
             js,
             null
         )
     }
 
-    // ============================================================
-    // KEY NAME -> ANDROID KEYCODE
-    // ============================================================
+    // ================================================================
+    // KEY NAME → ANDROID KEYCODE
+    // ================================================================
 
     private fun toKeyCode(
         name: String
@@ -346,13 +413,13 @@ class MainActivity : Activity() {
             if (c in 'A'..'Z') {
 
                 return KeyEvent.KEYCODE_A +
-                    (c - 'A')
+                        (c - 'A')
             }
 
             if (c in '0'..'9') {
 
                 return KeyEvent.KEYCODE_0 +
-                    (c - '0')
+                        (c - '0')
             }
         }
 
@@ -371,7 +438,7 @@ class MainActivity : Activity() {
             ) {
 
                 return KeyEvent.KEYCODE_F1 +
-                    (number - 1)
+                        (number - 1)
             }
         }
 
@@ -418,38 +485,111 @@ class MainActivity : Activity() {
         }
     }
 
-    // ============================================================
-    // REQUEST FULLSCREEN
-    // ============================================================
+    // ================================================================
+    // REQUEST HELMET HEROES FULLSCREEN
+    // ================================================================
 
-    private fun requestGameFullscreenFromAndroid() {
+    private fun requestHelmetHeroesFullscreen() {
 
-        gameFullscreen = true
+        gameWebView.evaluateJavascript(
+            """
+            (function() {
 
-        enterFullscreenMode()
+                try {
 
-        webView.requestFocus()
+                    var element =
+                        document.documentElement;
+
+                    if (
+                        element.requestFullscreen
+                    ) {
+
+                        var p =
+                            element.requestFullscreen();
+
+                        if (
+                            p &&
+                            typeof p.catch === 'function'
+                        ) {
+
+                            p.catch(function() {});
+
+                        }
+
+                        return;
+
+                    }
+
+                    if (
+                        element.webkitRequestFullscreen
+                    ) {
+
+                        element.webkitRequestFullscreen();
+
+                        return;
+
+                    }
+
+                    if (
+                        element.mozRequestFullScreen
+                    ) {
+
+                        element.mozRequestFullScreen();
+
+                        return;
+
+                    }
+
+                    if (
+                        element.msRequestFullscreen
+                    ) {
+
+                        element.msRequestFullscreen();
+
+                        return;
+
+                    }
+
+                } catch(e) {}
+
+            })();
+            """.trimIndent(),
+            null
+        )
     }
 
-    // ============================================================
-    // EXIT FULLSCREEN
-    // ============================================================
+    // ================================================================
+    // EXIT HELMET HEROES FULLSCREEN
+    // ================================================================
 
-    private fun exitGameFullscreenFromAndroid() {
+    private fun exitHelmetHeroesFullscreen() {
 
-        gameFullscreen = false
+        fullscreenCallback?.onCustomViewHidden()
 
-        exitFullscreenMode()
+        fullscreenView?.let {
 
-        webView.requestFocus()
+            rootLayout.removeView(it)
+        }
+
+        fullscreenView = null
+        fullscreenCallback = null
+
+        gameWebView.visibility = View.VISIBLE
+
+        controllerWebView.visibility = View.VISIBLE
+        controllerWebView.bringToFront()
+
+        normalGameMode()
+
+        gameWebView.requestFocus()
     }
 
-    // ============================================================
-    // ENTER FULLSCREEN
-    // ============================================================
+    // ================================================================
+    // FULLSCREEN SYSTEM UI
+    // ================================================================
 
     @Suppress("DEPRECATION")
-    private fun enterFullscreenMode() {
+    private fun gameFullscreenMode() {
 
         window.addFlags(
             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
@@ -463,46 +603,11 @@ class MainActivity : Activity() {
             View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
             View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
 
-        /*
-         * Make WebView occupy the entire available screen.
-         */
-        val params =
-            webView.layoutParams
-
-        params.width =
-            FrameLayout.LayoutParams.MATCH_PARENT
-
-        params.height =
-            FrameLayout.LayoutParams.MATCH_PARENT
-
-        webView.layoutParams =
-            params
-
-        webView.requestLayout()
-
-        webView.requestFocus()
-
-        /*
-         * Tell the page that the viewport changed.
-         */
-        webView.evaluateJavascript(
-            """
-            (function() {
-                try {
-                    window.dispatchEvent(new Event('resize'));
-                } catch(e) {}
-            })();
-            """.trimIndent(),
-            null
-        )
+        controllerWebView.bringToFront()
     }
 
-    // ============================================================
-    // EXIT FULLSCREEN
-    // ============================================================
-
     @Suppress("DEPRECATION")
-    private fun exitFullscreenMode() {
+    private fun normalGameMode() {
 
         window.decorView.systemUiVisibility =
             View.SYSTEM_UI_FLAG_FULLSCREEN or
@@ -512,84 +617,196 @@ class MainActivity : Activity() {
             View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
             View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
 
-        webView.requestFocus()
-
-        webView.evaluateJavascript(
-            """
-            (function() {
-                try {
-                    window.dispatchEvent(new Event('resize'));
-                } catch(e) {}
-            })();
-            """.trimIndent(),
-            null
-        )
+        controllerWebView.bringToFront()
     }
 
-    // ============================================================
-    // CREATE
-    // ============================================================
+    // ================================================================
+    // CREATE CONTROLLER WEBVIEW
+    // ================================================================
 
     @SuppressLint(
         "SetJavaScriptEnabled",
         "AddJavascriptInterface"
     )
-    override fun onCreate(
-        savedInstanceState: Bundle?
-    ) {
+    private fun createControllerWebView() {
 
-        super.onCreate(savedInstanceState)
-
-        window.addFlags(
-            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-        )
-
-        // --------------------------------------------------------
-        // ROOT FRAME
-        // --------------------------------------------------------
-
-        rootLayout =
-            FrameLayout(this)
-
-        rootLayout.layoutParams =
-            FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
-
-        // --------------------------------------------------------
-        // WEBVIEW
-        // --------------------------------------------------------
-
-        webView =
+        controllerWebView =
             WebView(this)
 
-        webView.layoutParams =
+        controllerWebView.setBackgroundColor(
+            Color.TRANSPARENT
+        )
+
+        controllerWebView.setLayerType(
+            View.LAYER_TYPE_HARDWARE,
+            null
+        )
+
+        controllerWebView.isFocusable = false
+        controllerWebView.isFocusableInTouchMode = false
+
+        controllerWebView.layoutParams =
             FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
 
-        webView.isFocusable = true
-        webView.isFocusableInTouchMode = true
+        with(controllerWebView.settings) {
 
-        // --------------------------------------------------------
-        // ADD WEBVIEW TO ROOT
-        // --------------------------------------------------------
+            javaScriptEnabled = true
+
+            domStorageEnabled = true
+
+            databaseEnabled = true
+
+            allowFileAccess = true
+
+            allowContentAccess = true
+
+            setSupportZoom(false)
+
+            builtInZoomControls = false
+
+            displayZoomControls = false
+
+            useWideViewPort = false
+
+            loadWithOverviewMode = false
+        }
+
+        controllerWebView.addJavascriptInterface(
+            KeyBridge(),
+            "AndroidKeys"
+        )
+
+        controllerWebView.webViewClient =
+            object : WebViewClient() {
+
+                override fun onPageFinished(
+                    view: WebView?,
+                    url: String?
+                ) {
+
+                    super.onPageFinished(
+                        view,
+                        url
+                    )
+
+                    loadControllerJavascript()
+                }
+            }
 
         rootLayout.addView(
-            webView
+            controllerWebView
         )
 
-        setContentView(
-            rootLayout
+        controllerWebView.bringToFront()
+
+        val controllerPage =
+            """
+            <!DOCTYPE html>
+
+            <html>
+
+            <head>
+
+                <meta
+                    name="viewport"
+                    content="width=device-width,
+                    initial-scale=1.0,
+                    maximum-scale=1.0,
+                    user-scalable=no"
+                >
+
+                <style>
+
+                    html,
+                    body {
+
+                        margin: 0;
+                        padding: 0;
+
+                        width: 100%;
+                        height: 100%;
+
+                        background: transparent;
+
+                        overflow: hidden;
+
+                        user-select: none;
+                        -webkit-user-select: none;
+
+                    }
+
+                </style>
+
+            </head>
+
+            <body></body>
+
+            </html>
+            """.trimIndent()
+
+        controllerWebView.loadDataWithBaseURL(
+            "https://controller.local/",
+            controllerPage,
+            "text/html",
+            "UTF-8",
+            null
         )
+    }
 
-        // --------------------------------------------------------
-        // WEBVIEW SETTINGS
-        // --------------------------------------------------------
+    // ================================================================
+    // LOAD YOUR EXISTING CONTROLLER.JS
+    // ================================================================
 
-        with(webView.settings) {
+    private fun loadControllerJavascript() {
+
+        try {
+
+            val controller =
+                assets.open(
+                    "controller.js"
+                )
+                    .bufferedReader()
+                    .use {
+                        it.readText()
+                    }
+
+            controllerWebView.evaluateJavascript(
+                controller,
+                null
+            )
+
+        } catch (e: Exception) {
+
+            e.printStackTrace()
+        }
+    }
+
+    // ================================================================
+    // CREATE GAME WEBVIEW
+    // ================================================================
+
+    @SuppressLint(
+        "SetJavaScriptEnabled",
+        "AddJavascriptInterface"
+    )
+    private fun createGameWebView() {
+
+        gameWebView =
+            WebView(this)
+
+        gameWebView.layoutParams =
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+
+        gameWebView.isFocusable = true
+        gameWebView.isFocusableInTouchMode = true
+
+        with(gameWebView.settings) {
 
             javaScriptEnabled = true
 
@@ -619,27 +836,10 @@ class MainActivity : Activity() {
                 "Chrome/124.0.0.0 Safari/537.36"
         }
 
-        // --------------------------------------------------------
-        // ANDROID BRIDGE
-        // --------------------------------------------------------
-
-        webView.addJavascriptInterface(
-            KeyBridge(),
-            "AndroidKeys"
-        )
-
-        // --------------------------------------------------------
-        // CHROME
-        // --------------------------------------------------------
-
-        webView.webChromeClient =
+        gameWebView.webChromeClient =
             chromeClient
 
-        // --------------------------------------------------------
-        // WEBVIEW CLIENT
-        // --------------------------------------------------------
-
-        webView.webViewClient =
+        gameWebView.webViewClient =
             object : WebViewClient() {
 
                 override fun onPageFinished(
@@ -652,45 +852,74 @@ class MainActivity : Activity() {
                         url
                     )
 
-                    try {
-
-                        val controller =
-                            assets.open(
-                                "controller.js"
-                            )
-                                .bufferedReader()
-                                .use {
-                                    it.readText()
-                                }
-
-                        view?.evaluateJavascript(
-                            controller,
-                            null
-                        )
-
-                    } catch (e: Exception) {
-
-                        e.printStackTrace()
-                    }
+                    // Make sure controller is always on top.
+                    controllerWebView.bringToFront()
                 }
             }
 
-        // --------------------------------------------------------
-        // LOAD GAME
-        // --------------------------------------------------------
-
-        webView.loadUrl(
-            GAME_URL
+        rootLayout.addView(
+            gameWebView
         )
 
-        webView.requestFocus()
-
-        enterFullscreenMode()
+        gameWebView.loadUrl(
+            GAME_URL
+        )
     }
 
-    // ============================================================
-    // WINDOW FOCUS
-    // ============================================================
+    // ================================================================
+    // ACTIVITY CREATE
+    // ================================================================
+
+    override fun onCreate(
+        savedInstanceState: Bundle?
+    ) {
+
+        super.onCreate(
+            savedInstanceState
+        )
+
+        window.addFlags(
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        )
+
+        rootLayout =
+            FrameLayout(this)
+
+        rootLayout.setBackgroundColor(
+            Color.BLACK
+        )
+
+        rootLayout.layoutParams =
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+
+        setContentView(
+            rootLayout
+        )
+
+        // ------------------------------------------------------------
+        // ORDER IS IMPORTANT:
+        //
+        // 1. Game
+        // 2. Controller
+        //
+        // Controller is therefore always above game.
+        // ------------------------------------------------------------
+
+        createGameWebView()
+
+        createControllerWebView()
+
+        controllerWebView.bringToFront()
+
+        gameFullscreenMode()
+    }
+
+    // ================================================================
+    // KEEP CONTROLLER ABOVE EVERYTHING
+    // ================================================================
 
     override fun onWindowFocusChanged(
         hasFocus: Boolean
@@ -702,41 +931,37 @@ class MainActivity : Activity() {
 
         if (hasFocus) {
 
-            enterFullscreenMode()
+            gameFullscreenMode()
 
-            webView.requestFocus()
+            controllerWebView.bringToFront()
         }
     }
-
-    // ============================================================
-    // RESUME
-    // ============================================================
 
     override fun onResume() {
 
         super.onResume()
 
-        webView.onResume()
+        gameWebView.onResume()
 
-        enterFullscreenMode()
+        controllerWebView.onResume()
 
-        webView.requestFocus()
+        gameFullscreenMode()
+
+        controllerWebView.bringToFront()
     }
-
-    // ============================================================
-    // PAUSE
-    // ============================================================
 
     override fun onPause() {
 
-        webView.onPause()
+        controllerWebView.onPause()
+
+        gameWebView.onPause()
 
         super.onPause()
     }
 
-    // ============================================================
-    // BACK
-    // ============================================================
+    // ================================================================
+    // BACK BUTTON
+    // ================================================================
 
     @Suppress(
         "DEPRECATION",
@@ -744,16 +969,16 @@ class MainActivity : Activity() {
     )
     override fun onBackPressed() {
 
-        if (gameFullscreen) {
+        if (fullscreenView != null) {
 
-            exitGameFullscreenFromAndroid()
+            exitHelmetHeroesFullscreen()
 
             return
         }
 
-        if (webView.canGoBack()) {
+        if (gameWebView.canGoBack()) {
 
-            webView.goBack()
+            gameWebView.goBack()
 
             return
         }
@@ -761,31 +986,50 @@ class MainActivity : Activity() {
         super.onBackPressed()
     }
 
-    // ============================================================
-    // DESTROY
-    // ============================================================
+    // ================================================================
+    // CLEANUP
+    // ================================================================
 
     override fun onDestroy() {
 
-        webView.stopLoading()
+        fullscreenView?.let {
 
-        webView.destroy()
+            rootLayout.removeView(it)
+        }
+
+        controllerWebView.stopLoading()
+        gameWebView.stopLoading()
+
+        controllerWebView.destroy()
+        gameWebView.destroy()
 
         super.onDestroy()
     }
 
-    // ============================================================
-    // KOTLIN STRING -> JAVASCRIPT STRING
-    // ============================================================
+    // ================================================================
+    // JS STRING ESCAPE
+    // ================================================================
 
     private fun String.quoteJs(): String {
 
         return "'" +
-            this
-                .replace("\\", "\\\\")
-                .replace("'", "\\'")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r") +
-            "'"
+                this
+                    .replace(
+                        "\\",
+                        "\\\\"
+                    )
+                    .replace(
+                        "'",
+                        "\\'"
+                    )
+                    .replace(
+                        "\n",
+                        "\\n"
+                    )
+                    .replace(
+                        "\r",
+                        "\\r"
+                    ) +
+                "'"
     }
 }
