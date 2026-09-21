@@ -277,11 +277,6 @@
 
     try {
 
-        /*
-         * Tell Android to enter fullscreen while keeping
-         * the WebView/controller together.
-         */
-
         if (
             window.AndroidKeys &&
             typeof window.AndroidKeys.key === 'function'
@@ -295,32 +290,8 @@
             return;
         }
 
-        /*
-         * Browser fallback.
-         */
-
-        var root =
-            document.documentElement;
-
-        if (
-            root.requestFullscreen
-        ) {
-
-            var p =
-                root.requestFullscreen();
-
-            if (
-                p &&
-                typeof p.catch === 'function'
-            ) {
-
-                p.catch(
-                    function () {}
-                );
-            }
-        }
-
     } catch (e) {}
+
 }
 
     // ============================================================
