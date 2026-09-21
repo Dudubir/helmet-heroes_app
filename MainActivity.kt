@@ -48,25 +48,20 @@ class MainActivity : Activity() {
     // allow this nested class declaration in the previous scope.
     // ============================================================
 
+   class MainActivity : Activity() {
+
     private data class ButtonData(
-        val id: String,
+        val name: String,
         val label: String,
-        val keyCode: Int,
+        val key: String,
         var x: Float,
         var y: Float,
-        var width: Float,
-        var height: Float,
-        val hold: Boolean
+        var width: Int,
+        var height: Int,
+        val hold: Boolean = false
     )
 
-    private lateinit var rootLayout: FrameLayout
-    private lateinit var gameWebView: WebView
-    private lateinit var controller: ControllerOverlay
-
-    private var fullscreenView: View? = null
-    private var fullscreenCallback:
-            WebChromeClient.CustomViewCallback? = null
-
+    // rest of MainActivity...
     // ============================================================
     // FULLSCREEN WEBVIEW
     // ============================================================
