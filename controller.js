@@ -2,13 +2,17 @@
 
     "use strict";
 
-    // ============================================================
-    // NATIVE CONTROLLER BRIDGE
-    // ============================================================
+    /*
+     * Android controller bridge.
+     *
+     * The actual editable buttons are implemented natively
+     * in MainActivity.kt so that they remain above Helmet Heroes
+     * when WebView enters fullscreen.
+     */
 
     window.AndroidController = {
 
-        sendKey: function (key, down) {
+        sendKey: function (name, down) {
 
             try {
 
@@ -18,14 +22,14 @@
                 ) {
 
                     window.AndroidKeys.key(
-                        key,
+                        name,
                         down
                     );
 
                 }
 
-            } catch (e) {}
-
+            } catch (e) {
+            }
         },
 
         fullscreen: function () {
@@ -44,8 +48,8 @@
 
                 }
 
-            } catch (e) {}
-
+            } catch (e) {
+            }
         }
 
     };
