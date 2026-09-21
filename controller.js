@@ -7,9 +7,9 @@
     // STORAGE
     // ============================================================
 
-    var STORE = 'vpad_layout_v3';
-    var SET_STORE = 'vpad_settings_v3';
-    var HIDE_STORE = 'vpad_hidden_v3';
+    var STORE = 'vpad_layout_v4';
+    var SET_STORE = 'vpad_settings_v4';
+    var HIDE_STORE = 'vpad_hidden_v4';
 
     // ============================================================
     // KEY TABLE
@@ -115,10 +115,7 @@
 
             var up = name.toUpperCase();
 
-            if (
-                up >= 'A' &&
-                up <= 'Z'
-            ) {
+            if (up >= 'A' && up <= 'Z') {
 
                 return {
                     key: name.toLowerCase(),
@@ -127,10 +124,7 @@
                 };
             }
 
-            if (
-                up >= '0' &&
-                up <= '9'
-            ) {
+            if (up >= '0' && up <= '9') {
 
                 return {
                     key: up,
@@ -144,23 +138,21 @@
     }
 
     var KEY_NAMES =
-        Object.keys(SPECIAL)
-            .concat(
-                'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-                    .split('')
-            );
+        Object.keys(SPECIAL).concat(
+            'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.split('')
+        );
 
     // ============================================================
-    // FALLBACK JAVASCRIPT KEY EVENT
+    // JAVASCRIPT FALLBACK KEY EVENT
     // ============================================================
 
-    function fallbackFire(
-        type,
-        info
-    ) {
+    function fallbackFire(type, info) {
 
-        var ev =
-            new KeyboardEvent(
+        var ev;
+
+        try {
+
+            ev = new KeyboardEvent(
                 type,
                 {
                     key: info.key,
@@ -172,6 +164,11 @@
                     view: window
                 }
             );
+
+        } catch (e) {
+
+            return;
+        }
 
         try {
 
@@ -197,48 +194,48 @@
 
         } catch (e) {}
 
-        window.dispatchEvent(ev);
-        document.dispatchEvent(ev);
-
-        var t =
+        var target =
             document.activeElement;
 
         if (
-            !t ||
-            t === document.body ||
-            t === document.documentElement
+            !target ||
+            target === document.body ||
+            target === document.documentElement
         ) {
 
-            t =
+            target =
                 document.querySelector('canvas') ||
                 document;
         }
 
         try {
-            t.dispatchEvent(ev);
+            target.dispatchEvent(ev);
+        } catch (e) {}
+
+        try {
+            window.dispatchEvent(ev);
         } catch (e) {}
     }
 
     // ============================================================
-    // SEND KEY TO ANDROID
+    // SEND KEY
     // ============================================================
 
-    function sendKey(
-        name,
-        down
-    ) {
+    function sendKey(name, down) {
 
         var info =
             keyInfo(name);
 
         if (!info) return;
 
+        var androidWorked = false;
+
         // --------------------------------------------------------
-        // Stop this transparent controller WebView from stealing
-        // keyboard focus.
+        // REAL ANDROID KEY EVENT
         // --------------------------------------------------------
 
         try {
+
             if (
                 window.AndroidKeys &&
                 typeof window.AndroidKeys.key === 'function'
@@ -248,18 +245,182 @@
                     name,
                     down
                 );
+
+                androidWorked = true;
             }
 
         } catch (e) {}
 
         // --------------------------------------------------------
-        // JS fallback as additional compatibility.
+        // JAVASCRIPT FALLBACK
+        //
+        // Only use this if Android bridge is unavailable.
+        // This prevents duplicate keyboard events.
         // --------------------------------------------------------
 
-        fallbackFire(
-            down ? 'keydown' : 'keyup',
-            info
-        );
+        if (!androidWorked) {
+
+            fallbackFire(
+                down
+                    ? 'keydown'
+                    : 'keyup',
+                info
+            );
+        }
+    }
+
+    // ============================================================
+    // REAL GAME FULLSCREEN
+    // ============================================================
+
+    function requestGameFullscreen() {
+
+        try {
+
+            // ----------------------------------------------------
+            // Find the largest game element.
+            // Helmet Heroes normally uses canvas/game elements.
+            // ----------------------------------------------------
+
+            var best = null;
+            var bestArea = 0;
+
+            var list =
+                document.querySelectorAll(
+                    'canvas, iframe, video, embed, object'
+                );
+
+            for (
+                var i = 0;
+                i < list.length;
+                i++
+            ) {
+
+                var r =
+                    list[i].getBoundingClientRect();
+
+                var area =
+                    r.width * r.height;
+
+                if (
+                    area > bestArea
+                ) {
+
+                    bestArea = area;
+                    best = list[i];
+                }
+            }
+
+            // ----------------------------------------------------
+            // Prefer the actual game element.
+            // ----------------------------------------------------
+
+            if (best) {
+
+                if (
+                    best.requestFullscreen
+                ) {
+
+                    var result =
+                        best.requestFullscreen();
+
+                    if (
+                        result &&
+                        typeof result.catch === 'function'
+                    ) {
+
+                        result.catch(
+                            function () {}
+                        );
+                    }
+
+                    return;
+                }
+
+                if (
+                    best.webkitRequestFullscreen
+                ) {
+
+                    best.webkitRequestFullscreen();
+
+                    return;
+                }
+            }
+
+            // ----------------------------------------------------
+            // Fallback to document element.
+            // ----------------------------------------------------
+
+            var root =
+                document.documentElement;
+
+            if (
+                root.requestFullscreen
+            ) {
+
+                var result2 =
+                    root.requestFullscreen();
+
+                if (
+                    result2 &&
+                    typeof result2.catch === 'function'
+                ) {
+
+                    result2.catch(
+                        function () {}
+                    );
+                }
+
+                return;
+            }
+
+            if (
+                root.webkitRequestFullscreen
+            ) {
+
+                root.webkitRequestFullscreen();
+            }
+
+        } catch (e) {}
+    }
+
+    // ============================================================
+    // EXIT FULLSCREEN
+    // ============================================================
+
+    function exitGameFullscreen() {
+
+        try {
+
+            if (
+                document.fullscreenElement &&
+                document.exitFullscreen
+            ) {
+
+                document.exitFullscreen();
+
+                return;
+            }
+
+            if (
+                document.webkitFullscreenElement &&
+                document.webkitExitFullscreen
+            ) {
+
+                document.webkitExitFullscreen();
+
+                return;
+            }
+
+            if (
+                document.webkitIsFullScreen &&
+                document.webkitCancelFullScreen
+            ) {
+
+                document.webkitCancelFullScreen();
+            }
+
+        } catch (e) {}
     }
 
     // ============================================================
@@ -368,10 +529,12 @@
     var hidden = false;
 
     try {
+
         layout =
             JSON.parse(
                 localStorage.getItem(STORE)
             );
+
     } catch (e) {}
 
     if (!Array.isArray(layout)) {
@@ -612,6 +775,7 @@
             hidden &&
             !editing
         ) {
+
             return;
         }
 
@@ -705,14 +869,12 @@
                 e.stopPropagation();
 
                 try {
+
                     el.setPointerCapture(
                         e.pointerId
                     );
-                } catch (x) {}
 
-                // ------------------------------------------------
-                // EDIT MODE
-                // ------------------------------------------------
+                } catch (x) {}
 
                 if (editing) {
 
@@ -725,10 +887,6 @@
                     return;
                 }
 
-                // ------------------------------------------------
-                // GAME MODE
-                // ------------------------------------------------
-
                 if (!pressed) {
 
                     pressed = true;
@@ -737,7 +895,6 @@
                         'down'
                     );
 
-                    // Tell Android to send a real keyboard key.
                     sendKey(
                         b.key,
                         true
@@ -757,6 +914,7 @@
                     !editing ||
                     !dragging
                 ) {
+
                     return;
                 }
 
@@ -805,6 +963,23 @@
             }
         );
 
+        function releaseKey() {
+
+            if (pressed) {
+
+                pressed = false;
+
+                el.classList.remove(
+                    'down'
+                );
+
+                sendKey(
+                    b.key,
+                    false
+                );
+            }
+        }
+
         function up(e) {
 
             e.preventDefault();
@@ -834,19 +1009,7 @@
                 return;
             }
 
-            if (pressed) {
-
-                pressed = false;
-
-                el.classList.remove(
-                    'down'
-                );
-
-                sendKey(
-                    b.key,
-                    false
-                );
-            }
+            releaseKey();
         }
 
         el.addEventListener(
@@ -865,15 +1028,17 @@
             }
         );
 
+        /*
+         * If the Android system cancels the pointer,
+         * release the key safely.
+         */
         el.addEventListener(
-            'pointerleave',
+            'lostpointercapture',
             function () {
 
-                // Do NOT release the key just because
-                // the finger temporarily leaves the button.
-                //
-                // This makes W/A/S/D work much better
-                // for continuous movement.
+                if (!editing) {
+                    releaseKey();
+                }
             }
         );
     }
@@ -1344,8 +1509,10 @@
             t.addEventListener(
                 'pointerdown',
                 function (e) {
+
                     e.preventDefault();
                     e.stopPropagation();
+
                 },
                 {
                     passive: false
@@ -1366,36 +1533,31 @@
             bar.appendChild(t);
         }
 
-        // --------------------------------------------------------
+        // ========================================================
         // NORMAL MODE
-        // --------------------------------------------------------
+        // ========================================================
 
         if (!editing) {
 
-            // This Full button now asks Android/WebView
-            // to use the REAL fullscreen API.
+            // ----------------------------------------------------
+            // REAL FULLSCREEN
+            // ----------------------------------------------------
+
             tool(
                 'Full',
                 function () {
 
-                    try {
+                    requestGameFullscreen();
 
-                        // Ask the GAME WebView to request fullscreen.
-                        //
-                        // The controller itself is separate from
-                        // the game, so its own document is not used.
-
-                        window.AndroidKeys.key(
-                            '__REQUEST_GAME_FULLSCREEN__',
-                            true
-                        );
-
-                    } catch (e) {}
                 },
                 {
                     opacity: '.6'
                 }
             );
+
+            // ----------------------------------------------------
+            // SHOW / HIDE CONTROLLER
+            // ----------------------------------------------------
 
             tool(
                 hidden
@@ -1426,6 +1588,10 @@
                 }
             );
 
+            // ----------------------------------------------------
+            // SETTINGS / EDIT
+            // ----------------------------------------------------
+
             tool(
                 '\u2699',
 
@@ -1442,6 +1608,10 @@
             );
 
         } else {
+
+            // ====================================================
+            // EDIT MODE
+            // ====================================================
 
             tool(
                 'Done',
