@@ -2,10 +2,9 @@
   if (window.__vpad) return;
   window.__vpad = true;
 
-  var STORE = 'vpad_layout_v1';
-  var HIDE_STORE = 'vpad_hidden_v1';
+  var STORE = 'vpad_layout_v2', SET_STORE = 'vpad_settings_v2', HIDE_STORE = 'vpad_hidden_v2';
 
-  // ---------- Key table ----------
+  // ---------- Key table (fallback kung walang Android bridge) ----------
   var SPECIAL = {
     'Space': { key: ' ', code: 'Space', kc: 32 },
     'Enter': { key: 'Enter', code: 'Enter', kc: 13 },
@@ -34,7 +33,7 @@
   }
   var KEY_NAMES = Object.keys(SPECIAL).concat('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.split(''));
 
-  function fire(type, info) {
+  function fallbackFire(type, info) {
     var ev = new KeyboardEvent(type, {
       key: info.key, code: info.code, keyCode: info.kc, which: info.kc,
       bubbles: true, cancelable: true, view: window
@@ -43,10 +42,77 @@
       Object.defineProperty(ev, 'keyCode', { get: function () { return info.kc; } });
       Object.defineProperty(ev, 'which', { get: function () { return info.kc; } });
     } catch (e) {}
-    (document.activeElement || document).dispatchEvent(ev);
+    var t = document.activeElement;
+    if (!t || t === document.body || t === document.documentElement) t = document.querySelector('canvas') || document;
+    t.dispatchEvent(ev);
   }
 
-  // ---------- Layout ----------
+  // Unahin ang TOTOONG Android key event; fallback sa JS event
+  function sendKey(name, down) {
+    var info = keyInfo(name);
+    if (!info) return;
+    try {
+      if (typeof window.AndroidKeys !== 'undefined') { window.AndroidKeys.key(name, down); return; }
+    } catch (e) {}
+    fallbackFire(down ? 'keydown' : 'keyup', info);
+  }
+
+
+  // ---------- Fullscreen (gumagana kahit sa WebView) ----------
+  var fsEl = null, fsSavedStyle = null, fsSavedOverflow = '';
+  function fsEvents() {
+    ['fullscreenchange', 'webkitfullscreenchange'].forEach(function (n) { document.dispatchEvent(new Event(n)); });
+    window.dispatchEvent(new Event('resize'));
+  }
+  function enterFs(el) {
+    if (fsEl) exitFs();
+    fsEl = el;
+    fsSavedStyle = el.getAttribute('style');
+    fsSavedOverflow = document.documentElement.style.overflow;
+    el.style.cssText += ';position:fixed!important;left:0!important;top:0!important;' +
+      'width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;' +
+      'margin:0!important;z-index:2147483000!important;background:#000!important;';
+    document.documentElement.style.overflow = 'hidden';
+    fsEvents();
+  }
+  function exitFs() {
+    if (!fsEl) return;
+    var el = fsEl; fsEl = null;
+    if (fsSavedStyle === null) el.removeAttribute('style'); else el.setAttribute('style', fsSavedStyle);
+    document.documentElement.style.overflow = fsSavedOverflow;
+    fsEvents();
+  }
+  ['requestFullscreen', 'webkitRequestFullscreen', 'webkitRequestFullScreen', 'mozRequestFullScreen', 'msRequestFullscreen']
+    .forEach(function (n) {
+      try { Element.prototype[n] = function () { enterFs(this); return Promise.resolve(); }; } catch (e) {}
+    });
+  ['exitFullscreen', 'webkitExitFullscreen', 'webkitCancelFullScreen', 'mozCancelFullScreen', 'msExitFullscreen']
+    .forEach(function (n) {
+      try { document[n] = function () { exitFs(); return Promise.resolve(); }; } catch (e) {}
+    });
+  function defGetter(name, fn) {
+    try { Object.defineProperty(document, name, { get: fn, configurable: true }); } catch (e) {}
+  }
+  ['fullscreenElement', 'webkitFullscreenElement', 'webkitCurrentFullScreenElement', 'mozFullScreenElement']
+    .forEach(function (n) { defGetter(n, function () { return fsEl; }); });
+  ['fullscreenEnabled', 'webkitFullscreenEnabled', 'mozFullScreenEnabled']
+    .forEach(function (n) { defGetter(n, function () { return true; }); });
+  ['webkitIsFullScreen', 'mozFullScreen']
+    .forEach(function (n) { defGetter(n, function () { return !!fsEl; }); });
+
+  function toggleFs() {
+    if (fsEl) { exitFs(); return; }
+    var best = null, area = 0;
+    var list = document.querySelectorAll('canvas,iframe,embed,object,video');
+    for (var i = 0; i < list.length; i++) {
+      var r = list[i].getBoundingClientRect();
+      if (r.width * r.height > area) { area = r.width * r.height; best = list[i]; }
+    }
+    if (best) enterFs(best);
+  }
+  window.__vpadExitFs = exitFs;
+
+  // ---------- Data ----------
   var DEFAULT = [
     { id: 1, label: 'W', key: 'W', x: 15, y: 50, size: 56 },
     { id: 2, label: 'A', key: 'A', x: 8, y: 68, size: 56 },
@@ -59,16 +125,17 @@
     { id: 9, label: 'B', key: 'B', x: 88, y: 54, size: 54 },
     { id: 10, label: 'ESC', key: 'Escape', x: 94, y: 38, size: 44 }
   ];
-  var layout;
+  var layout, settings, hidden = false;
   try { layout = JSON.parse(localStorage.getItem(STORE)); } catch (e) {}
   if (!Array.isArray(layout)) layout = JSON.parse(JSON.stringify(DEFAULT));
-  var hidden = false;
+  try { settings = JSON.parse(localStorage.getItem(SET_STORE)); } catch (e) {}
+  if (!settings || typeof settings.opacity !== 'number') settings = { opacity: 0.6, scale: 1 };
   try { hidden = localStorage.getItem(HIDE_STORE) === '1'; } catch (e) {}
   var editing = false, selectedId = null;
 
-  function save() {
-    try { localStorage.setItem(STORE, JSON.stringify(layout)); } catch (e) {}
-  }
+  function save() { try { localStorage.setItem(STORE, JSON.stringify(layout)); } catch (e) {} }
+  function saveSettings() { try { localStorage.setItem(SET_STORE, JSON.stringify(settings)); } catch (e) {} }
+  function effOpacity(b) { return typeof b.opacity === 'number' ? b.opacity : settings.opacity; }
 
   // ---------- Styles ----------
   var st = document.createElement('style');
@@ -78,27 +145,27 @@
     '#vpad-root *{-webkit-tap-highlight-color:transparent;box-sizing:border-box}' +
     '.vpad-btn{position:absolute;transform:translate(-50%,-50%);border-radius:50%;pointer-events:auto;' +
     'touch-action:none;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:bold;' +
-    'background:rgba(30,30,30,.45);border:2px solid rgba(255,255,255,.6);font-size:16px;text-align:center;overflow:hidden}' +
-    '.vpad-btn.down{background:rgba(255,255,255,.55);color:#000}' +
+    'background:rgba(30,30,30,.7);border:2px solid rgba(255,255,255,.8);text-align:center;overflow:hidden}' +
+    '.vpad-btn.down{background:rgba(255,255,255,.85);color:#000}' +
     '.vpad-btn.edit{border:2px dashed #ffd400}' +
     '.vpad-btn.sel{border:3px solid #00e5ff}' +
-    '.vpad-tool{pointer-events:auto;position:absolute;background:rgba(0,0,0,.6);color:#fff;border:1px solid #fff;' +
+    '.vpad-bar{position:absolute;top:6px;right:6px;display:flex;gap:6px;pointer-events:none}' +
+    '.vpad-tool{pointer-events:auto;background:rgba(0,0,0,.65);color:#fff;border:1px solid #fff;' +
     'border-radius:8px;padding:8px 12px;font-size:14px;touch-action:manipulation}' +
     '#vpad-panel{pointer-events:auto;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);' +
-    'background:rgba(20,20,20,.95);color:#fff;border:1px solid #888;border-radius:10px;padding:12px;width:260px;font-size:14px}' +
+    'background:rgba(20,20,20,.96);color:#fff;border:1px solid #888;border-radius:10px;padding:12px;' +
+    'width:280px;max-width:92%;max-height:88%;overflow-y:auto;font-size:14px}' +
     '#vpad-panel label{display:block;margin:8px 0 2px}' +
-    '#vpad-panel input{width:100%;padding:6px;font-size:16px;border-radius:6px;border:1px solid #666;background:#222;color:#fff}' +
+    '#vpad-panel input[type=text]{width:100%;padding:6px;font-size:16px;border-radius:6px;border:1px solid #666;background:#222;color:#fff}' +
+    '#vpad-panel input[type=range]{width:100%}' +
     '#vpad-panel button{margin:10px 6px 0 0;padding:8px 12px;border-radius:6px;border:1px solid #888;background:#333;color:#fff;font-size:14px}';
   document.documentElement.appendChild(st);
 
   var root = document.createElement('div');
   root.id = 'vpad-root';
   document.documentElement.appendChild(root);
-
-  var btnLayer = document.createElement('div');
-  root.appendChild(btnLayer);
-  var toolLayer = document.createElement('div');
-  root.appendChild(toolLayer);
+  var btnLayer = document.createElement('div'); root.appendChild(btnLayer);
+  var toolLayer = document.createElement('div'); root.appendChild(toolLayer);
 
   // ---------- Buttons ----------
   function render() {
@@ -108,26 +175,28 @@
       var el = document.createElement('div');
       el.className = 'vpad-btn' + (editing ? ' edit' : '') + (editing && b.id === selectedId ? ' sel' : '');
       el.textContent = b.label;
+      var px = Math.round(b.size * settings.scale);
       el.style.left = b.x + '%';
       el.style.top = b.y + '%';
-      el.style.width = b.size + 'px';
-      el.style.height = b.size + 'px';
-      if (b.size < 50) el.style.fontSize = '12px';
+      el.style.width = px + 'px';
+      el.style.height = px + 'px';
+      el.style.fontSize = Math.max(10, Math.round(px * 0.3)) + 'px';
+      el.style.opacity = editing ? Math.max(0.5, effOpacity(b)) : effOpacity(b);
       attach(el, b);
       btnLayer.appendChild(el);
     });
   }
 
   function attach(el, b) {
-    var dragging = false, moved = false, sx = 0, sy = 0, info = keyInfo(b.key), pressed = false;
+    var dragging = false, moved = false, sx = 0, sy = 0, pressed = false;
 
     el.addEventListener('pointerdown', function (e) {
       e.preventDefault(); e.stopPropagation();
       try { el.setPointerCapture(e.pointerId); } catch (x) {}
       if (editing) {
         dragging = true; moved = false; sx = e.clientX; sy = e.clientY;
-      } else if (info && !pressed) {
-        pressed = true; el.classList.add('down'); fire('keydown', info);
+      } else if (!pressed) {
+        pressed = true; el.classList.add('down'); sendKey(b.key, true);
       }
     });
     el.addEventListener('pointermove', function (e) {
@@ -148,85 +217,130 @@
           if (moved) { save(); } else { selectedId = b.id; render(); openPanel(b); }
         }
       } else if (pressed) {
-        pressed = false; el.classList.remove('down'); fire('keyup', info);
+        pressed = false; el.classList.remove('down'); sendKey(b.key, false);
       }
     }
     el.addEventListener('pointerup', up);
     el.addEventListener('pointercancel', up);
   }
 
-  // ---------- Edit panel ----------
-  function closePanel() {
-    var p = document.getElementById('vpad-panel');
-    if (p) p.remove();
-  }
+  // ---------- Panels ----------
+  function closePanel() { var p = document.getElementById('vpad-panel'); if (p) p.remove(); }
 
-  function openPanel(b) {
+  function newPanel() {
     closePanel();
     var p = document.createElement('div');
     p.id = 'vpad-panel';
-    p.innerHTML =
-      '<b>I-edit ang button</b>' +
-      '<label>Label (text sa button)</label><input id="vp-label">' +
-      '<label>Key (A-Z, 0-9, Space, Enter, Shift, ArrowUp, F1...)</label>' +
-      '<input id="vp-key" list="vp-keys" autocapitalize="off">' +
-      '<datalist id="vp-keys">' + KEY_NAMES.map(function (k) { return '<option value="' + k + '">'; }).join('') + '</datalist>' +
-      '<label>Laki: <span id="vp-sz"></span>px</label>' +
-      '<input id="vp-size" type="range" min="36" max="160">' +
-      '<div><button id="vp-del">Delete</button><button id="vp-ok">OK</button></div>';
+    p.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
     root.appendChild(p);
-    var l = p.querySelector('#vp-label'), k = p.querySelector('#vp-key'),
-        s = p.querySelector('#vp-size'), sz = p.querySelector('#vp-sz');
-    l.value = b.label; k.value = b.key; s.value = b.size; sz.textContent = b.size;
-    l.oninput = function () { b.label = l.value; save(); render(); };
-    k.oninput = function () {
-      // Tanggapin lang kapag valid na key
-      var v = k.value.length === 1 ? k.value.toUpperCase() : k.value;
-      if (keyInfo(v)) { b.key = v; k.style.borderColor = '#666'; save(); }
-      else k.style.borderColor = '#f44';
+    return p;
+  }
+
+  function addSlider(p, text, min, max, val, fmt, onInput) {
+    var lab = document.createElement('label');
+    var span = document.createElement('span');
+    span.textContent = fmt(val);
+    lab.textContent = text + ': ';
+    lab.appendChild(span);
+    var s = document.createElement('input');
+    s.type = 'range'; s.min = min; s.max = max; s.value = val;
+    s.oninput = function () { var v = parseInt(s.value, 10); span.textContent = fmt(v); onInput(v); };
+    p.appendChild(lab); p.appendChild(s);
+  }
+
+  function addButton(p, text, fn) {
+    var bt = document.createElement('button');
+    bt.textContent = text; bt.onclick = fn; p.appendChild(bt);
+  }
+
+  function openPanel(b) {
+    var p = newPanel();
+    var title = document.createElement('b'); title.textContent = 'I-edit ang button'; p.appendChild(title);
+
+    var l1 = document.createElement('label'); l1.textContent = 'Label (text sa button)'; p.appendChild(l1);
+    var inLabel = document.createElement('input'); inLabel.type = 'text'; inLabel.value = b.label; p.appendChild(inLabel);
+
+    var l2 = document.createElement('label'); l2.textContent = 'Key (A-Z, 0-9, Space, Enter, Shift, ArrowUp, F1...)'; p.appendChild(l2);
+    var inKey = document.createElement('input'); inKey.type = 'text'; inKey.value = b.key;
+    inKey.setAttribute('list', 'vp-keys'); inKey.setAttribute('autocapitalize', 'off'); p.appendChild(inKey);
+    var dl = document.createElement('datalist'); dl.id = 'vp-keys';
+    KEY_NAMES.forEach(function (k) { var o = document.createElement('option'); o.value = k; dl.appendChild(o); });
+    p.appendChild(dl);
+
+    inLabel.oninput = function () { b.label = inLabel.value; save(); render(); };
+    inKey.oninput = function () {
+      var v = inKey.value.length === 1 ? inKey.value.toUpperCase() : inKey.value;
+      if (keyInfo(v)) { b.key = v; inKey.style.borderColor = '#666'; save(); }
+      else inKey.style.borderColor = '#f44';
     };
-    s.oninput = function () { b.size = parseInt(s.value, 10); sz.textContent = b.size; save(); render(); };
-    p.querySelector('#vp-del').onclick = function () {
+
+    addSlider(p, 'Laki ng button', 30, 160, b.size, function (v) { return v + 'px'; },
+      function (v) { b.size = v; save(); render(); });
+    addSlider(p, 'Opacity ng button', 10, 100, Math.round(effOpacity(b) * 100), function (v) { return v + '%'; },
+      function (v) { b.opacity = v / 100; save(); render(); });
+
+    addButton(p, 'Delete', function () {
       layout = layout.filter(function (x) { return x.id !== b.id; });
       selectedId = null; save(); closePanel(); render();
-    };
-    p.querySelector('#vp-ok').onclick = function () { closePanel(); render(); };
+    });
+    addButton(p, 'OK', function () { closePanel(); render(); });
+  }
+
+  function openSettings() {
+    var p = newPanel();
+    var title = document.createElement('b'); title.textContent = 'Settings (lahat ng buttons)'; p.appendChild(title);
+    addSlider(p, 'Opacity', 10, 100, Math.round(settings.opacity * 100), function (v) { return v + '%'; },
+      function (v) {
+        settings.opacity = v / 100;
+        layout.forEach(function (b) { delete b.opacity; });
+        saveSettings(); save(); render();
+      });
+    addSlider(p, 'Laki', 50, 200, Math.round(settings.scale * 100), function (v) { return v + '%'; },
+      function (v) { settings.scale = v / 100; saveSettings(); render(); });
+    addButton(p, 'OK', function () { closePanel(); });
   }
 
   // ---------- Toolbar ----------
-  function mkTool(text, pos, fn) {
-    var t = document.createElement('div');
-    t.className = 'vpad-tool';
-    t.textContent = text;
-    for (var k in pos) t.style[k] = pos[k];
-    t.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
-    t.addEventListener('click', function (e) { e.stopPropagation(); fn(); });
-    toolLayer.appendChild(t);
-  }
-
   function renderTools() {
     toolLayer.innerHTML = '';
+    var bar = document.createElement('div');
+    bar.className = 'vpad-bar';
+    toolLayer.appendChild(bar);
+
+    function tool(text, fn, opts) {
+      var t = document.createElement('div');
+      t.className = 'vpad-tool';
+      t.textContent = text;
+      if (opts && opts.opacity) t.style.opacity = opts.opacity;
+      if (opts && opts.bg) t.style.background = opts.bg;
+      t.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
+      t.addEventListener('click', function (e) { e.stopPropagation(); fn(); });
+      bar.appendChild(t);
+    }
+
     if (!editing) {
-      mkTool('\u2699', { top: '6px', right: '6px', opacity: '.6' }, function () {
-        editing = true; renderTools(); render();
-      });
-      mkTool(hidden ? '\uD83D\uDC41' : '\uD83D\uDEAB', { top: '6px', right: '52px', opacity: '.6' }, function () {
+      tool('Full', function () { toggleFs(); }, { opacity: '.6' });
+      tool(hidden ? '\uD83D\uDC41' : '\uD83D\uDEAB', function () {
         hidden = !hidden;
         try { localStorage.setItem(HIDE_STORE, hidden ? '1' : '0'); } catch (e) {}
         renderTools(); render();
-      });
+      }, { opacity: '.6' });
+      tool('\u2699', function () { editing = true; renderTools(); render(); }, { opacity: '.6' });
     } else {
-      mkTool('+ Add', { top: '6px', right: '6px' }, function () {
-        var b = { id: Date.now(), label: 'X', key: 'X', x: 50, y: 50, size: 60 };
-        layout.push(b); selectedId = b.id; save(); render(); openPanel(b);
-      });
-      mkTool('Reset', { top: '6px', right: '80px' }, function () {
-        if (confirm('I-reset sa default ang layout?')) {
-          layout = JSON.parse(JSON.stringify(DEFAULT)); save(); closePanel(); render();
+      tool('Done', function () {
+        editing = false; selectedId = null; closePanel(); renderTools(); render();
+      }, { bg: 'rgba(0,140,60,.9)' });
+      tool('Reset', function () {
+        if (confirm('I-reset sa default ang layout at settings?')) {
+          layout = JSON.parse(JSON.stringify(DEFAULT));
+          settings = { opacity: 0.6, scale: 1 };
+          save(); saveSettings(); closePanel(); render();
         }
       });
-      mkTool('Done', { top: '6px', right: '150px', background: 'rgba(0,140,60,.85)' }, function () {
-        editing = false; selectedId = null; closePanel(); renderTools(); render();
+      tool('Settings', function () { openSettings(); });
+      tool('+ Add', function () {
+        var b = { id: Date.now(), label: 'X', key: 'X', x: 50, y: 50, size: 60 };
+        layout.push(b); selectedId = b.id; save(); render(); openPanel(b);
       });
     }
   }
