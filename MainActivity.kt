@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.MeasureSpec
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -25,6 +26,10 @@ import kotlin.math.min
 
 class MainActivity : Activity() {
 
+    // ============================================================
+    // CONSTANTS
+    // ============================================================
+
     companion object {
 
         private const val GAME_URL =
@@ -41,29 +46,41 @@ class MainActivity : Activity() {
     }
 
     // ============================================================
-    // EDITABLE CONTROLLER BUTTON DATA
-    //
-    // IMPORTANT:
-    // This is outside ControllerOverlay because Kotlin does not
-    // allow this nested class declaration in the previous scope.
+    // MAIN VIEWS
     // ============================================================
 
-   class MainActivity : Activity() {
+    private lateinit var rootLayout: FrameLayout
+
+    private lateinit var gameWebView: WebView
+
+    private lateinit var controller: ControllerOverlay
+
+    private var fullscreenView: View? = null
+
+    private var fullscreenCallback:
+            WebChromeClient.CustomViewCallback? = null
+
+    // ============================================================
+    // BUTTON DATA
+    //
+    // IMPORTANT:
+    // This is directly inside MainActivity.
+    // It is NOT inside ControllerOverlay.
+    // ============================================================
 
     private data class ButtonData(
-        val name: String,
+        val id: String,
         val label: String,
-        val key: String,
+        val keyCode: Int,
         var x: Float,
         var y: Float,
-        var width: Int,
-        var height: Int,
+        val width: Int,
+        val height: Int,
         val hold: Boolean = false
     )
 
-    // rest of MainActivity...
     // ============================================================
-    // FULLSCREEN WEBVIEW
+    // WEBVIEW FULLSCREEN HANDLER
     // ============================================================
 
     private val chromeClient =
@@ -79,11 +96,11 @@ class MainActivity : Activity() {
                     return
                 }
 
-                // Remove previous fullscreen view.
-                fullscreenView?.let {
+                // Remove previous fullscreen view if one exists.
+                fullscreenView?.let { oldView ->
 
                     try {
-                        rootLayout.removeView(it)
+                        rootLayout.removeView(oldView)
                     } catch (_: Exception) {
                     }
                 }
@@ -101,10 +118,10 @@ class MainActivity : Activity() {
                     Gravity.CENTER
 
                 /*
-                 * Put fullscreen game at index 0.
+                 * Put the fullscreen game at index 0.
                  *
-                 * The editable controller is added later and therefore
-                 * stays ABOVE the fullscreen game.
+                 * The controller is already above it, so the
+                 * controller remains visible.
                  */
                 rootLayout.addView(
                     view,
@@ -133,10 +150,10 @@ class MainActivity : Activity() {
 
             override fun onHideCustomView() {
 
-                fullscreenView?.let {
+                fullscreenView?.let { view ->
 
                     try {
-                        rootLayout.removeView(it)
+                        rootLayout.removeView(view)
                     } catch (_: Exception) {
                     }
                 }
@@ -147,19 +164,19 @@ class MainActivity : Activity() {
                 gameWebView.visibility =
                     View.VISIBLE
 
-                exitImmersive()
-
-                gameWebView.requestFocus()
-
                 controller.visibility =
                     View.VISIBLE
 
                 controller.bringToFront()
+
+                exitImmersive()
+
+                gameWebView.requestFocus()
             }
         }
 
     // ============================================================
-    // ANDROID JAVASCRIPT BRIDGE
+    // JAVASCRIPT BRIDGE
     // ============================================================
 
     inner class AndroidBridge {
@@ -202,7 +219,7 @@ class MainActivity : Activity() {
     }
 
     // ============================================================
-    // REQUEST GAME FULLSCREEN
+    // REQUEST WEB FULLSCREEN
     // ============================================================
 
     private fun requestFullscreen() {
@@ -212,43 +229,25 @@ class MainActivity : Activity() {
             gameWebView.evaluateJavascript(
                 """
                 (function() {
-
                     try {
+                        var el = document.documentElement;
 
-                        var el =
-                            document.documentElement;
+                        if (el.requestFullscreen) {
+                            var p = el.requestFullscreen();
 
-                        if (
-                            el.requestFullscreen
-                        ) {
-
-                            var p =
-                                el.requestFullscreen();
-
-                            if (
-                                p &&
-                                p.catch
-                            ) {
-
-                                p.catch(
-                                    function() {}
-                                );
+                            if (p && p.catch) {
+                                p.catch(function() {});
                             }
 
                             return;
                         }
 
-                        if (
-                            el.webkitRequestFullscreen
-                        ) {
-
+                        if (el.webkitRequestFullscreen) {
                             el.webkitRequestFullscreen();
-
                             return;
                         }
 
-                    } catch(e) {}
-
+                    } catch (e) {}
                 })();
                 """.trimIndent(),
                 null
@@ -259,22 +258,20 @@ class MainActivity : Activity() {
     }
 
     // ============================================================
-    // EXIT FULLSCREEN
+    // EXIT WEB FULLSCREEN
     // ============================================================
 
     private fun exitFullscreen() {
 
         try {
-
             fullscreenCallback?.onCustomViewHidden()
-
         } catch (_: Exception) {
         }
 
-        fullscreenView?.let {
+        fullscreenView?.let { view ->
 
             try {
-                rootLayout.removeView(it)
+                rootLayout.removeView(view)
             } catch (_: Exception) {
             }
         }
@@ -338,19 +335,18 @@ class MainActivity : Activity() {
                 )
 
             /*
-             * Send directly to the fullscreen game view.
+             * Send Android key event directly to the
+             * active game/fullscreen view.
              */
             target.dispatchKeyEvent(
                 event
             )
 
             /*
-             * Additional JavaScript fallback when the target
-             * is the normal WebView.
+             * Also send a browser keyboard event when
+             * the target is the normal WebView.
              */
-            if (
-                target is WebView
-            ) {
+            if (target is WebView) {
 
                 injectBrowserEvent(
                     target,
@@ -447,7 +443,10 @@ class MainActivity : Activity() {
             when (keyCode) {
 
                 in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z ->
-                    "Key" + key.uppercase(Locale.US)
+                    "Key" +
+                            key.uppercase(
+                                Locale.US
+                            )
 
                 KeyEvent.KEYCODE_SPACE ->
                     "Space"
@@ -505,7 +504,6 @@ class MainActivity : Activity() {
         val js =
             """
             (function() {
-
                 try {
 
                     var ev =
@@ -548,7 +546,6 @@ class MainActivity : Activity() {
                     document.dispatchEvent(ev);
 
                 } catch(e) {}
-
             })();
             """.trimIndent()
 
@@ -559,7 +556,7 @@ class MainActivity : Activity() {
     }
 
     // ============================================================
-    // KEY NAME -> ANDROID KEYCODE
+    // KEY NAME TO ANDROID KEYCODE
     // ============================================================
 
     private fun keyCodeFromName(
@@ -699,7 +696,7 @@ class MainActivity : Activity() {
         }
 
         // ========================================================
-        // DEFAULT BUTTONS
+        // DEFAULT BUTTON DATA
         // ========================================================
 
         private fun createButtonData() {
@@ -708,131 +705,131 @@ class MainActivity : Activity() {
 
             buttons.add(
                 ButtonData(
-                    "W",
-                    "W",
-                    KeyEvent.KEYCODE_W,
-                    15f,
-                    58f,
-                    56f,
-                    56f,
-                    false
+                    id = "W",
+                    label = "W",
+                    keyCode = KeyEvent.KEYCODE_W,
+                    x = 15f,
+                    y = 58f,
+                    width = 56,
+                    height = 56,
+                    hold = false
                 )
             )
 
             buttons.add(
                 ButtonData(
-                    "A",
-                    "A",
-                    KeyEvent.KEYCODE_A,
-                    8f,
-                    76f,
-                    56f,
-                    56f,
-                    false
+                    id = "A",
+                    label = "A",
+                    keyCode = KeyEvent.KEYCODE_A,
+                    x = 8f,
+                    y = 76f,
+                    width = 56,
+                    height = 56,
+                    hold = false
                 )
             )
 
             buttons.add(
                 ButtonData(
-                    "S",
-                    "S",
-                    KeyEvent.KEYCODE_S,
-                    15f,
-                    94f,
-                    56f,
-                    56f,
-                    false
+                    id = "S",
+                    label = "S",
+                    keyCode = KeyEvent.KEYCODE_S,
+                    x = 15f,
+                    y = 94f,
+                    width = 56,
+                    height = 56,
+                    hold = false
                 )
             )
 
             buttons.add(
                 ButtonData(
-                    "D",
-                    "D",
-                    KeyEvent.KEYCODE_D,
-                    22f,
-                    76f,
-                    56f,
-                    56f,
-                    false
+                    id = "D",
+                    label = "D",
+                    keyCode = KeyEvent.KEYCODE_D,
+                    x = 22f,
+                    y = 76f,
+                    width = 56,
+                    height = 56,
+                    hold = false
                 )
             )
 
             buttons.add(
                 ButtonData(
-                    "ATTACK",
-                    "ATK",
-                    KeyEvent.KEYCODE_SPACE,
-                    90f,
-                    80f,
-                    76f,
-                    60f,
-                    true
+                    id = "ATTACK",
+                    label = "ATK",
+                    keyCode = KeyEvent.KEYCODE_SPACE,
+                    x = 90f,
+                    y = 80f,
+                    width = 76,
+                    height = 60,
+                    hold = true
                 )
             )
 
             buttons.add(
                 ButtonData(
-                    "E",
-                    "E",
-                    KeyEvent.KEYCODE_E,
-                    76f,
-                    86f,
-                    50f,
-                    50f,
-                    false
+                    id = "E",
+                    label = "E",
+                    keyCode = KeyEvent.KEYCODE_E,
+                    x = 76f,
+                    y = 86f,
+                    width = 50,
+                    height = 50,
+                    hold = false
                 )
             )
 
             buttons.add(
                 ButtonData(
-                    "M",
-                    "M",
-                    KeyEvent.KEYCODE_M,
-                    68f,
-                    64f,
-                    54f,
-                    54f,
-                    false
+                    id = "M",
+                    label = "M",
+                    keyCode = KeyEvent.KEYCODE_M,
+                    x = 68f,
+                    y = 64f,
+                    width = 54,
+                    height = 54,
+                    hold = false
                 )
             )
 
             buttons.add(
                 ButtonData(
-                    "N",
-                    "N",
-                    KeyEvent.KEYCODE_N,
-                    78f,
-                    58f,
-                    54f,
-                    54f,
-                    false
+                    id = "N",
+                    label = "N",
+                    keyCode = KeyEvent.KEYCODE_N,
+                    x = 78f,
+                    y = 58f,
+                    width = 54,
+                    height = 54,
+                    hold = false
                 )
             )
 
             buttons.add(
                 ButtonData(
-                    "B",
-                    "B",
-                    KeyEvent.KEYCODE_B,
-                    88f,
-                    56f,
-                    54f,
-                    54f,
-                    false
+                    id = "B",
+                    label = "B",
+                    keyCode = KeyEvent.KEYCODE_B,
+                    x = 88f,
+                    y = 56f,
+                    width = 54,
+                    height = 54,
+                    hold = false
                 )
             )
 
             buttons.add(
                 ButtonData(
-                    "ESC",
-                    "ESC",
-                    KeyEvent.KEYCODE_ESCAPE,
-                    94f,
-                    30f,
-                    50f,
-                    44f,
-                    false
+                    id = "ESC",
+                    label = "ESC",
+                    keyCode = KeyEvent.KEYCODE_ESCAPE,
+                    x = 94f,
+                    y = 30f,
+                    width = 50,
+                    height = 44,
+                    hold = false
                 )
             )
         }
@@ -918,7 +915,7 @@ class MainActivity : Activity() {
         }
 
         // ========================================================
-        // BUTTON TOUCH HANDLER
+        // TOUCH HANDLER
         // ========================================================
 
         private fun createTouchHandler(
@@ -941,10 +938,7 @@ class MainActivity : Activity() {
             var moved =
                 false
 
-            return OnTouchListener {
-
-                _,
-                event ->
+            return OnTouchListener { _, event ->
 
                 when (
                     event.actionMasked
@@ -991,8 +985,8 @@ class MainActivity : Activity() {
                             } else {
 
                                 /*
-                                 * W/A/S/D/E/M/N/B/ESC:
-                                 * quick tap only.
+                                 * All normal buttons are
+                                 * quick tap buttons.
                                  */
                                 pressKey(
                                     data.keyCode
@@ -1023,9 +1017,7 @@ class MainActivity : Activity() {
                                 abs(dx) > 4f ||
                                 abs(dy) > 4f
                             ) {
-
-                                moved =
-                                    true
+                                moved = true
                             }
 
                             if (moved) {
@@ -1044,8 +1036,8 @@ class MainActivity : Activity() {
                         } else {
 
                             /*
-                             * ATTACK remains held until
-                             * ACTION_UP / ACTION_CANCEL.
+                             * Attack remains held while
+                             * the finger stays down.
                              */
                             true
                         }
@@ -1058,9 +1050,7 @@ class MainActivity : Activity() {
 
                         if (editMode) {
 
-                            saveButton(
-                                data
-                            )
+                            saveButton(data)
 
                             true
 
@@ -1107,7 +1097,8 @@ class MainActivity : Activity() {
                         true
                     }
 
-                    else -> true
+                    else ->
+                        true
                 }
             }
         }
@@ -1165,9 +1156,7 @@ class MainActivity : Activity() {
                     100f
                 )
 
-            applyPosition(
-                data
-            )
+            applyPosition(data)
         }
 
         // ========================================================
@@ -1178,16 +1167,14 @@ class MainActivity : Activity() {
 
             for (data in buttons) {
 
-                applyPosition(
-                    data
-                )
+                applyPosition(data)
             }
 
             applyToolbarPosition()
         }
 
         // ========================================================
-        // APPLY INDIVIDUAL BUTTON POSITION
+        // APPLY INDIVIDUAL POSITION
         // ========================================================
 
         private fun applyPosition(
@@ -1277,9 +1264,7 @@ class MainActivity : Activity() {
             newToolbar.tag =
                 "controller_toolbar"
 
-            addView(
-                newToolbar
-            )
+            addView(newToolbar)
 
             editButton =
                 createToolbarButton(
@@ -1314,25 +1299,15 @@ class MainActivity : Activity() {
                     "+"
                 )
 
-            newToolbar.addView(
-                editButton
-            )
+            newToolbar.addView(editButton)
 
-            newToolbar.addView(
-                resetButton
-            )
+            newToolbar.addView(resetButton)
 
-            newToolbar.addView(
-                minusButton
-            )
+            newToolbar.addView(minusButton)
 
-            newToolbar.addView(
-                scaleLabel
-            )
+            newToolbar.addView(scaleLabel)
 
-            newToolbar.addView(
-                plusButton
-            )
+            newToolbar.addView(plusButton)
 
             editButton?.setOnClickListener {
 
@@ -1396,25 +1371,18 @@ class MainActivity : Activity() {
             updateEditAppearance()
 
             post {
-
                 applyToolbarPosition()
             }
         }
 
         // ========================================================
-        // FIXED TOOLBAR POSITION FUNCTION
-        //
-        // This was the second compile error:
-        // "Unresolved reference: applyToolbarPosition"
-        //
-        // The toolbar is always centered horizontally at the top.
+        // TOOLBAR POSITION
         // ========================================================
 
         private fun applyToolbarPosition() {
 
             val currentToolbar =
-                toolbar
-                    ?: return
+                toolbar ?: return
 
             if (
                 width <= 0 ||
@@ -1550,7 +1518,7 @@ class MainActivity : Activity() {
         }
 
         // ========================================================
-        // RESET CONTROLLER
+        // RESET
         // ========================================================
 
         private fun resetController() {
@@ -1575,7 +1543,7 @@ class MainActivity : Activity() {
         }
 
         // ========================================================
-        // SAVE BUTTON POSITION
+        // SAVE POSITION
         // ========================================================
 
         private fun saveButton(
@@ -1868,7 +1836,7 @@ class MainActivity : Activity() {
         }
 
         // ========================================================
-        // RESIZE / ROTATION
+        // SIZE / ROTATION
         // ========================================================
 
         override fun onSizeChanged(
@@ -1932,7 +1900,7 @@ class MainActivity : Activity() {
         )
 
         // ========================================================
-        // GAME WEBVIEW
+        // WEBVIEW
         // ========================================================
 
         gameWebView =
@@ -2025,13 +1993,11 @@ class MainActivity : Activity() {
         // ========================================================
         // CONTROLLER
         //
-        // Controller is added AFTER WebView, so it is above it.
+        // Added AFTER WebView, so it is above the WebView.
         // ========================================================
 
         controller =
-            ControllerOverlay(
-                this
-            )
+            ControllerOverlay(this)
 
         rootLayout.addView(
             controller,
@@ -2042,6 +2008,10 @@ class MainActivity : Activity() {
         )
 
         controller.bringToFront()
+
+        // ========================================================
+        // LOAD GAME
+        // ========================================================
 
         gameWebView.loadUrl(
             GAME_URL
@@ -2136,7 +2106,7 @@ class MainActivity : Activity() {
     }
 
     // ============================================================
-    // BACK BUTTON
+    // BACK
     // ============================================================
 
     @Suppress(
@@ -2175,9 +2145,7 @@ class MainActivity : Activity() {
         controller.releaseAllKeys()
 
         try {
-
             fullscreenCallback?.onCustomViewHidden()
-
         } catch (_: Exception) {
         }
 
