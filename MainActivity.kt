@@ -2,6 +2,7 @@ package com.gamewrap.app
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.graphics.Color
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.KeyEvent
@@ -9,6 +10,7 @@ import android.view.View
 import android.view.WindowManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
@@ -19,20 +21,30 @@ class MainActivity : Activity() {
         const val GAME_URL = "https://www.helmet-heroes.com/"
     }
 
-    private lateinit var webView: WebView
+    // ============================================================
+    // VIEWS
+    // ============================================================
+
+    private lateinit var rootLayout: FrameLayout
+    private lateinit var gameWebView: WebView
+    private lateinit var controllerWebView: WebView
+
+    // ============================================================
+    // HTML5 FULLSCREEN
+    // ============================================================
 
     private var customView: View? = null
     private var customCallback: WebChromeClient.CustomViewCallback? = null
 
     // ============================================================
-    // HTML5 FULLSCREEN
+    // CHROME CLIENT
     // ============================================================
 
     private val chromeClient = object : WebChromeClient() {
 
         override fun onShowCustomView(
             view: View?,
-            callback: WebChromeClient.CustomViewCallback?
+            callback: CustomViewCallback?
         ) {
 
             if (view == null) {
@@ -40,6 +52,7 @@ class MainActivity : Activity() {
                 return
             }
 
+            // Already fullscreen.
             if (customView != null) {
                 callback?.onCustomViewHidden()
                 return
@@ -48,17 +61,13 @@ class MainActivity : Activity() {
             customView = view
             customCallback = callback
 
-            window.addFlags(
-                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-            )
+            // ----------------------------------------------------
+            // Put game's fullscreen view into the root.
+            // ----------------------------------------------------
 
-            enterImmersiveFullscreen()
-
-            val decor =
-                window.decorView as FrameLayout
-
-            decor.addView(
+            rootLayout.addView(
                 view,
+                0,
                 FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     FrameLayout.LayoutParams.MATCH_PARENT
@@ -67,70 +76,85 @@ class MainActivity : Activity() {
 
             view.isFocusable = true
             view.isFocusableInTouchMode = true
-
             view.requestFocus()
+
+            // ----------------------------------------------------
+            // Controller stays ABOVE the fullscreen game.
+            // ----------------------------------------------------
+
+            controllerWebView.visibility = View.VISIBLE
+            controllerWebView.bringToFront()
+
+            // ----------------------------------------------------
+            // Full Android immersive mode.
+            // ----------------------------------------------------
+
+            enterFullscreen()
+
+            // ----------------------------------------------------
+            // Tell controller that the game is fullscreen.
+            // ----------------------------------------------------
+
+            controllerWebView.evaluateJavascript(
+                "window.__gameFullscreen = true;",
+                null
+            )
         }
 
         override fun onHideCustomView() {
 
-            val view = customView
+            val oldView = customView
 
-            if (view != null) {
-
-                val parent = view.parent
-
-                if (parent is FrameLayout) {
-                    parent.removeView(view)
-                }
+            if (oldView != null) {
+                rootLayout.removeView(oldView)
             }
 
             customView = null
 
             customCallback?.onCustomViewHidden()
-
             customCallback = null
 
-            enterImmersiveFullscreen()
+            // Controller remains visible.
+            controllerWebView.visibility = View.VISIBLE
+            controllerWebView.bringToFront()
 
-            webView.requestFocus()
+            enterFullscreen()
+
+            // Return focus to game.
+            focusGame()
+
+            controllerWebView.evaluateJavascript(
+                "window.__gameFullscreen = false;",
+                null
+            )
         }
     }
 
     // ============================================================
-    // VIRTUAL KEYBOARD BRIDGE
+    // KEY BRIDGE
     // ============================================================
 
     inner class KeyBridge {
 
         @JavascriptInterface
-        fun key(
-            name: String,
-            down: Boolean
-        ) {
+        fun key(name: String, down: Boolean) {
 
-            val code =
-                toKeyCode(name)
-                    ?: return
+            val code = toKeyCode(name) ?: return
 
             runOnUiThread {
 
-                /*
-                 * IMPORTANT:
-                 *
-                 * Always send the key to the WebView.
-                 *
-                 * Do NOT use:
-                 *
-                 * customView ?: webView
-                 *
-                 * because customView is not the page's JavaScript
-                 * keyboard target.
-                 */
+                // VERY IMPORTANT:
+                // Always send keyboard events to the GAME WebView.
+                //
+                // Do NOT send them to customView.
+                //
+                // customView is only the fullscreen display.
+                // The game page itself lives in gameWebView.
+                // ------------------------------------------------
 
-                webView.requestFocus()
+                focusGame()
 
-                val now =
-                    SystemClock.uptimeMillis()
+                val now = SystemClock.uptimeMillis()
 
                 val action =
                     if (down) {
@@ -139,70 +163,60 @@ class MainActivity : Activity() {
                         KeyEvent.ACTION_UP
                     }
 
-                val event =
-                    KeyEvent(
-                        now,
-                        now,
-                        action,
-                        code,
-                        0
-                    )
+                val event = KeyEvent(
+                    now,
+                    now,
+                    action,
+                    code,
+                    0,
+                    0,
+                    KeyCharacterMap.VIRTUAL_KEYBOARD,
+                    0,
+                    KeyEvent.FLAG_SOFT_KEYBOARD or
+                            KeyEvent.FLAG_KEEP_TOUCH_MODE,
+                    android.view.InputDevice.SOURCE_KEYBOARD
+                )
 
-                /*
-                 * Send the real Android keyboard event
-                 * directly to the WebView.
-                 */
-                webView.dispatchKeyEvent(event)
+                // Send the real Android keyboard event
+                // directly into the game WebView.
+                gameWebView.dispatchKeyEvent(event)
+
+                // Also send a JavaScript keyboard event as a
+                // compatibility fallback.
+                sendJavaScriptKey(name, down)
             }
         }
     }
 
     // ============================================================
-    // KEY MAPPING
+    // KEY CODE CONVERSION
     // ============================================================
 
-    private fun toKeyCode(
-        n: String
-    ): Int? {
+    private fun toKeyCode(name: String): Int? {
 
-        if (n.length == 1) {
+        if (name.length == 1) {
 
-            val c =
-                n[0].uppercaseChar()
+            val c = name[0].uppercaseChar()
 
             if (c in 'A'..'Z') {
-
-                return KeyEvent.KEYCODE_A +
-                        (c - 'A')
+                return KeyEvent.KEYCODE_A + (c - 'A')
             }
 
             if (c in '0'..'9') {
-
-                return KeyEvent.KEYCODE_0 +
-                        (c - '0')
+                return KeyEvent.KEYCODE_0 + (c - '0')
             }
         }
 
-        if (
-            n.length in 2..3 &&
-            n[0] == 'F'
-        ) {
+        if (name.length in 2..3 && name[0] == 'F') {
 
-            val num =
-                n.substring(1)
-                    .toIntOrNull()
+            val number = name.substring(1).toIntOrNull()
 
-            if (
-                num != null &&
-                num in 1..12
-            ) {
-
-                return KeyEvent.KEYCODE_F1 +
-                        (num - 1)
+            if (number != null && number in 1..12) {
+                return KeyEvent.KEYCODE_F1 + number - 1
             }
         }
 
-        return when (n) {
+        return when (name) {
 
             "Space" ->
                 KeyEvent.KEYCODE_SPACE
@@ -240,8 +254,170 @@ class MainActivity : Activity() {
             "ArrowRight" ->
                 KeyEvent.KEYCODE_DPAD_RIGHT
 
-            else -> null
+            else ->
+                null
         }
+    }
+
+    // ============================================================
+    // JAVASCRIPT KEY FALLBACK
+    // ============================================================
+
+    private fun sendJavaScriptKey(
+        name: String,
+        down: Boolean
+    ) {
+
+        val jsName =
+            name
+                .replace("\\", "\\\\")
+                .replace("'", "\\'")
+
+        val js = """
+            (function(){
+                try {
+                    var key = '$jsName';
+
+                    var keyMap = {
+                        'Space': {
+                            key: ' ',
+                            code: 'Space',
+                            keyCode: 32
+                        },
+                        'Enter': {
+                            key: 'Enter',
+                            code: 'Enter',
+                            keyCode: 13
+                        },
+                        'Escape': {
+                            key: 'Escape',
+                            code: 'Escape',
+                            keyCode: 27
+                        },
+                        'Tab': {
+                            key: 'Tab',
+                            code: 'Tab',
+                            keyCode: 9
+                        },
+                        'ArrowUp': {
+                            key: 'ArrowUp',
+                            code: 'ArrowUp',
+                            keyCode: 38
+                        },
+                        'ArrowDown': {
+                            key: 'ArrowDown',
+                            code: 'ArrowDown',
+                            keyCode: 40
+                        },
+                        'ArrowLeft': {
+                            key: 'ArrowLeft',
+                            code: 'ArrowLeft',
+                            keyCode: 37
+                        },
+                        'ArrowRight': {
+                            key: 'ArrowRight',
+                            code: 'ArrowRight',
+                            keyCode: 39
+                        }
+                    };
+
+                    var info = keyMap[key];
+
+                    if (!info && key.length === 1) {
+
+                        var upper = key.toUpperCase();
+
+                        if (
+                            upper >= 'A' &&
+                            upper <= 'Z'
+                        ) {
+                            info = {
+                                key: key.toLowerCase(),
+                                code: 'Key' + upper,
+                                keyCode: upper.charCodeAt(0)
+                            };
+                        }
+
+                        if (
+                            upper >= '0' &&
+                            upper <= '9'
+                        ) {
+                            info = {
+                                key: upper,
+                                code: 'Digit' + upper,
+                                keyCode: upper.charCodeAt(0)
+                            };
+                        }
+                    }
+
+                    if (!info) return;
+
+                    var type = ${if (down) "'keydown'" else "'keyup'"};
+
+                    var ev = new KeyboardEvent(type, {
+                        key: info.key,
+                        code: info.code,
+                        keyCode: info.keyCode,
+                        which: info.keyCode,
+                        bubbles: true,
+                        cancelable: true,
+                        view: window
+                    });
+
+                    try {
+                        Object.defineProperty(
+                            ev,
+                            'keyCode',
+                            {
+                                get: function(){
+                                    return info.keyCode;
+                                }
+                            }
+                        );
+
+                        Object.defineProperty(
+                            ev,
+                            'which',
+                            {
+                                get: function(){
+                                    return info.keyCode;
+                                }
+                            }
+                        );
+                    } catch(e) {}
+
+                    window.dispatchEvent(ev);
+                    document.dispatchEvent(ev);
+
+                    var active = document.activeElement;
+
+                    if (
+                        active &&
+                        active !== document.body &&
+                        active !== document.documentElement
+                    ) {
+                        active.dispatchEvent(ev);
+                    }
+
+                } catch(e) {}
+            })();
+        """.trimIndent()
+
+        gameWebView.evaluateJavascript(js, null)
+    }
+
+    // ============================================================
+    // GAME FOCUS
+    // ============================================================
+
+    private fun focusGame() {
+
+        gameWebView.isFocusable = true
+        gameWebView.isFocusableInTouchMode = true
+
+        gameWebView.requestFocus()
+
+        gameWebView.requestFocusFromTouch()
     }
 
     // ============================================================
@@ -249,19 +425,19 @@ class MainActivity : Activity() {
     // ============================================================
 
     @Suppress("DEPRECATION")
-    private fun enterImmersiveFullscreen() {
+    private fun enterFullscreen() {
 
         window.decorView.systemUiVisibility =
             View.SYSTEM_UI_FLAG_FULLSCREEN or
-            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
-            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
-            View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
-            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
-            View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                    View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                    View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
     }
 
     // ============================================================
-    // ACTIVITY
+    // CREATE ACTIVITY
     // ============================================================
 
     @SuppressLint(
@@ -274,30 +450,49 @@ class MainActivity : Activity() {
 
         super.onCreate(savedInstanceState)
 
+        // Keep display awake.
         window.addFlags(
             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
         )
 
         // ========================================================
-        // WEBVIEW
+        // ROOT LAYOUT
         // ========================================================
 
-        webView = WebView(this)
+        rootLayout = FrameLayout(this)
 
-        webView.isFocusable = true
-        webView.isFocusableInTouchMode = true
+        rootLayout.setBackgroundColor(Color.BLACK)
 
-        setContentView(webView)
+        setContentView(rootLayout)
 
         // ========================================================
-        // WEBVIEW SETTINGS
+        // GAME WEBVIEW
         // ========================================================
 
-        with(webView.settings) {
+        gameWebView = WebView(this)
+
+        gameWebView.isFocusable = true
+        gameWebView.isFocusableInTouchMode = true
+
+        rootLayout.addView(
+            gameWebView,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+
+        // ========================================================
+        // GAME WEBVIEW SETTINGS
+        // ========================================================
+
+        with(gameWebView.settings) {
 
             javaScriptEnabled = true
 
             domStorageEnabled = true
+
+            databaseEnabled = true
 
             mediaPlaybackRequiresUserGesture = false
 
@@ -311,33 +506,38 @@ class MainActivity : Activity() {
 
             setSupportZoom(false)
 
+            javaScriptCanOpenWindowsAutomatically = true
+
+            allowFileAccess = true
+
+            allowContentAccess = true
+
             userAgentString =
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-                "AppleWebKit/537.36 (KHTML, like Gecko) " +
-                "Chrome/124.0.0.0 Safari/537.36"
+                        "AppleWebKit/537.36 (KHTML, like Gecko) " +
+                        "Chrome/124.0.0.0 Safari/537.36"
         }
 
         // ========================================================
-        // CONTROLLER BRIDGE
+        // KEY BRIDGE
         // ========================================================
 
-        webView.addJavascriptInterface(
+        gameWebView.addJavascriptInterface(
             KeyBridge(),
             "AndroidKeys"
         )
 
         // ========================================================
-        // FULLSCREEN
+        // CHROME CLIENT
         // ========================================================
 
-        webView.webChromeClient =
-            chromeClient
+        gameWebView.webChromeClient = chromeClient
 
         // ========================================================
-        // WEBVIEW CLIENT
+        // GAME CLIENT
         // ========================================================
 
-        webView.webViewClient =
+        gameWebView.webViewClient =
             object : WebViewClient() {
 
                 override fun onPageFinished(
@@ -345,42 +545,156 @@ class MainActivity : Activity() {
                     url: String?
                 ) {
 
-                    super.onPageFinished(
-                        view,
-                        url
-                    )
+                    super.onPageFinished(view, url)
 
-                    try {
+                    // ------------------------------------------------
+                    // Focus the game.
+                    // ------------------------------------------------
 
-                        val controller =
-                            assets
-                                .open("controller.js")
-                                .bufferedReader()
-                                .use {
-                                    it.readText()
-                                }
-
-                        view?.evaluateJavascript(
-                            controller,
-                            null
-                        )
-
-                    } catch (e: Exception) {
-
-                        e.printStackTrace()
-                    }
+                    focusGame()
                 }
             }
+
+        // ========================================================
+        // CONTROLLER WEBVIEW
+        // ========================================================
+
+        controllerWebView = WebView(this)
+
+        controllerWebView.setBackgroundColor(
+            Color.TRANSPARENT
+        )
+
+        controllerWebView.isOpaque = false
+
+        controllerWebView.isFocusable = false
+        controllerWebView.isFocusableInTouchMode = false
+
+        controllerWebView.settings.javaScriptEnabled = true
+        controllerWebView.settings.domStorageEnabled = true
+        controllerWebView.settings.allowFileAccess = true
+
+        // --------------------------------------------------------
+        // IMPORTANT:
+        // Controller WebView does NOT receive keyboard focus.
+        // It only sends keys to gameWebView.
+        // --------------------------------------------------------
+
+        controllerWebView.addJavascriptInterface(
+            KeyBridge(),
+            "AndroidKeys"
+        )
+
+        controllerWebView.webChromeClient =
+            WebChromeClient()
+
+        controllerWebView.webViewClient =
+            object : WebViewClient() {
+
+                override fun onPageFinished(
+                    view: WebView?,
+                    url: String?
+                ) {
+
+                    super.onPageFinished(view, url)
+
+                    loadController()
+                }
+            }
+
+        // --------------------------------------------------------
+        // Add controller ABOVE game.
+        // --------------------------------------------------------
+
+        rootLayout.addView(
+            controllerWebView,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+
+        controllerWebView.bringToFront()
+
+        // ========================================================
+        // LOAD CONTROLLER
+        // ========================================================
+
+        loadController()
 
         // ========================================================
         // LOAD GAME
         // ========================================================
 
-        webView.loadUrl(GAME_URL)
+        gameWebView.loadUrl(GAME_URL)
 
-        webView.requestFocus()
+        // ========================================================
+        // IMMERSIVE
+        // ========================================================
 
-        enterImmersiveFullscreen()
+        enterFullscreen()
+    }
+
+    // ============================================================
+    // LOAD CONTROLLER JAVASCRIPT
+    // ============================================================
+
+    private fun loadController() {
+
+        try {
+
+            val controller =
+                assets.open("controller.js")
+                    .bufferedReader()
+                    .use {
+                        it.readText()
+                    }
+
+            controllerWebView.loadDataWithBaseURL(
+                "https://controller.local/",
+                """
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <meta
+                            name="viewport"
+                            content="width=device-width,
+                            initial-scale=1.0,
+                            maximum-scale=1.0,
+                            user-scalable=no"
+                        >
+
+                        <style>
+                            html,
+                            body {
+                                margin: 0;
+                                padding: 0;
+                                width: 100%;
+                                height: 100%;
+                                background: transparent;
+                                overflow: hidden;
+                            }
+                        </style>
+                    </head>
+
+                    <body>
+
+                    <script>
+                    $controller
+                    </script>
+
+                    </body>
+                    </html>
+                """.trimIndent(),
+                "text/html",
+                "UTF-8",
+                null
+            )
+
+        } catch (e: Exception) {
+
+            e.printStackTrace()
+        }
     }
 
     // ============================================================
@@ -391,15 +705,15 @@ class MainActivity : Activity() {
         hasFocus: Boolean
     ) {
 
-        super.onWindowFocusChanged(
-            hasFocus
-        )
+        super.onWindowFocusChanged(hasFocus)
 
         if (hasFocus) {
 
-            enterImmersiveFullscreen()
+            enterFullscreen()
 
-            webView.requestFocus()
+            controllerWebView.bringToFront()
+
+            focusGame()
         }
     }
 
@@ -411,11 +725,14 @@ class MainActivity : Activity() {
 
         super.onResume()
 
-        webView.onResume()
+        gameWebView.onResume()
+        controllerWebView.onResume()
 
-        webView.requestFocus()
+        enterFullscreen()
 
-        enterImmersiveFullscreen()
+        controllerWebView.bringToFront()
+
+        focusGame()
     }
 
     // ============================================================
@@ -424,13 +741,14 @@ class MainActivity : Activity() {
 
     override fun onPause() {
 
-        webView.onPause()
+        controllerWebView.onPause()
+        gameWebView.onPause()
 
         super.onPause()
     }
 
     // ============================================================
-    // BACK
+    // BACK BUTTON
     // ============================================================
 
     @Suppress(
@@ -439,6 +757,10 @@ class MainActivity : Activity() {
     )
     override fun onBackPressed() {
 
+        // --------------------------------------------------------
+        // Exit Helmet Heroes fullscreen first.
+        // --------------------------------------------------------
+
         if (customView != null) {
 
             chromeClient.onHideCustomView()
@@ -446,9 +768,13 @@ class MainActivity : Activity() {
             return
         }
 
-        if (webView.canGoBack()) {
+        // --------------------------------------------------------
+        // Otherwise WebView history.
+        // --------------------------------------------------------
 
-            webView.goBack()
+        if (gameWebView.canGoBack()) {
+
+            gameWebView.goBack()
 
             return
         }
@@ -466,9 +792,11 @@ class MainActivity : Activity() {
             chromeClient.onHideCustomView()
         }
 
-        webView.stopLoading()
+        gameWebView.stopLoading()
+        controllerWebView.stopLoading()
 
-        webView.destroy()
+        gameWebView.destroy()
+        controllerWebView.destroy()
 
         super.onDestroy()
     }
