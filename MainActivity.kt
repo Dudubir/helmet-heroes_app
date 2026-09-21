@@ -25,7 +25,7 @@ class MainActivity : Activity() {
     private var customCallback: WebChromeClient.CustomViewCallback? = null
 
     // ============================================================
-    // HTML5 FULLSCREEN SUPPORT
+    // HTML5 FULLSCREEN
     // ============================================================
 
     private val chromeClient = object : WebChromeClient() {
@@ -34,12 +34,12 @@ class MainActivity : Activity() {
             view: View?,
             callback: WebChromeClient.CustomViewCallback?
         ) {
+
             if (view == null) {
                 callback?.onCustomViewHidden()
                 return
             }
 
-            // If another fullscreen view already exists, remove it first.
             if (customView != null) {
                 callback?.onCustomViewHidden()
                 return
@@ -48,14 +48,14 @@ class MainActivity : Activity() {
             customView = view
             customCallback = callback
 
-            // Keep screen awake.
-            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+            )
 
-            // Enter Android immersive fullscreen.
-            enterFullscreen()
+            enterImmersiveFullscreen()
 
-            // Put the game's fullscreen view above the WebView.
-            val decor = window.decorView as FrameLayout
+            val decor =
+                window.decorView as FrameLayout
 
             decor.addView(
                 view,
@@ -67,50 +67,70 @@ class MainActivity : Activity() {
 
             view.isFocusable = true
             view.isFocusableInTouchMode = true
+
             view.requestFocus()
         }
 
         override fun onHideCustomView() {
+
             val view = customView
 
             if (view != null) {
+
                 val parent = view.parent
 
                 if (parent is FrameLayout) {
                     parent.removeView(view)
-                } else {
-                    (window.decorView as FrameLayout).removeView(view)
                 }
             }
 
             customView = null
 
             customCallback?.onCustomViewHidden()
+
             customCallback = null
 
-            // Return to normal WebView mode.
-            enterFullscreen()
+            enterImmersiveFullscreen()
 
             webView.requestFocus()
         }
     }
 
     // ============================================================
-    // ANDROID KEYBOARD / CONTROLLER BRIDGE
+    // VIRTUAL KEYBOARD BRIDGE
     // ============================================================
 
     inner class KeyBridge {
 
         @JavascriptInterface
-        fun key(name: String, down: Boolean) {
+        fun key(
+            name: String,
+            down: Boolean
+        ) {
 
-            val code = toKeyCode(name) ?: return
+            val code =
+                toKeyCode(name)
+                    ?: return
 
             runOnUiThread {
 
-                val now = SystemClock.uptimeMillis()
+                /*
+                 * IMPORTANT:
+                 *
+                 * Always send the key to the WebView.
+                 *
+                 * Do NOT use:
+                 *
+                 * customView ?: webView
+                 *
+                 * because customView is not the page's JavaScript
+                 * keyboard target.
+                 */
 
                 webView.requestFocus()
+
+                val now =
+                    SystemClock.uptimeMillis()
 
                 val action =
                     if (down) {
@@ -119,9 +139,7 @@ class MainActivity : Activity() {
                         KeyEvent.ACTION_UP
                     }
 
-                val target = customView ?: webView
-
-                target.dispatchKeyEvent(
+                val event =
                     KeyEvent(
                         now,
                         now,
@@ -129,75 +147,109 @@ class MainActivity : Activity() {
                         code,
                         0
                     )
-                )
+
+                /*
+                 * Send the real Android keyboard event
+                 * directly to the WebView.
+                 */
+                webView.dispatchKeyEvent(event)
             }
         }
     }
 
     // ============================================================
-    // JAVASCRIPT KEY -> ANDROID KEYCODE
+    // KEY MAPPING
     // ============================================================
 
-    private fun toKeyCode(n: String): Int? {
+    private fun toKeyCode(
+        n: String
+    ): Int? {
 
         if (n.length == 1) {
 
-            val c = n[0].uppercaseChar()
+            val c =
+                n[0].uppercaseChar()
 
             if (c in 'A'..'Z') {
-                return KeyEvent.KEYCODE_A + (c - 'A')
+
+                return KeyEvent.KEYCODE_A +
+                        (c - 'A')
             }
 
             if (c in '0'..'9') {
-                return KeyEvent.KEYCODE_0 + (c - '0')
+
+                return KeyEvent.KEYCODE_0 +
+                        (c - '0')
             }
         }
 
-        if (n.length in 2..3 && n[0] == 'F') {
+        if (
+            n.length in 2..3 &&
+            n[0] == 'F'
+        ) {
 
-            val num = n.substring(1).toIntOrNull()
+            val num =
+                n.substring(1)
+                    .toIntOrNull()
 
-            if (num != null && num in 1..12) {
-                return KeyEvent.KEYCODE_F1 + (num - 1)
+            if (
+                num != null &&
+                num in 1..12
+            ) {
+
+                return KeyEvent.KEYCODE_F1 +
+                        (num - 1)
             }
         }
 
         return when (n) {
 
-            "Space" -> KeyEvent.KEYCODE_SPACE
+            "Space" ->
+                KeyEvent.KEYCODE_SPACE
 
-            "Enter" -> KeyEvent.KEYCODE_ENTER
+            "Enter" ->
+                KeyEvent.KEYCODE_ENTER
 
-            "Escape" -> KeyEvent.KEYCODE_ESCAPE
+            "Escape" ->
+                KeyEvent.KEYCODE_ESCAPE
 
-            "Tab" -> KeyEvent.KEYCODE_TAB
+            "Tab" ->
+                KeyEvent.KEYCODE_TAB
 
-            "Backspace" -> KeyEvent.KEYCODE_DEL
+            "Backspace" ->
+                KeyEvent.KEYCODE_DEL
 
-            "Shift" -> KeyEvent.KEYCODE_SHIFT_LEFT
+            "Shift" ->
+                KeyEvent.KEYCODE_SHIFT_LEFT
 
-            "Control" -> KeyEvent.KEYCODE_CTRL_LEFT
+            "Control" ->
+                KeyEvent.KEYCODE_CTRL_LEFT
 
-            "Alt" -> KeyEvent.KEYCODE_ALT_LEFT
+            "Alt" ->
+                KeyEvent.KEYCODE_ALT_LEFT
 
-            "ArrowUp" -> KeyEvent.KEYCODE_DPAD_UP
+            "ArrowUp" ->
+                KeyEvent.KEYCODE_DPAD_UP
 
-            "ArrowDown" -> KeyEvent.KEYCODE_DPAD_DOWN
+            "ArrowDown" ->
+                KeyEvent.KEYCODE_DPAD_DOWN
 
-            "ArrowLeft" -> KeyEvent.KEYCODE_DPAD_LEFT
+            "ArrowLeft" ->
+                KeyEvent.KEYCODE_DPAD_LEFT
 
-            "ArrowRight" -> KeyEvent.KEYCODE_DPAD_RIGHT
+            "ArrowRight" ->
+                KeyEvent.KEYCODE_DPAD_RIGHT
 
             else -> null
         }
     }
 
     // ============================================================
-    // ANDROID IMMERSIVE FULLSCREEN
+    // IMMERSIVE FULLSCREEN
     // ============================================================
 
     @Suppress("DEPRECATION")
-    private fun enterFullscreen() {
+    private fun enterImmersiveFullscreen() {
 
         window.decorView.systemUiVisibility =
             View.SYSTEM_UI_FLAG_FULLSCREEN or
@@ -209,15 +261,19 @@ class MainActivity : Activity() {
     }
 
     // ============================================================
-    // ACTIVITY CREATED
+    // ACTIVITY
     // ============================================================
 
-    @SuppressLint("SetJavaScriptEnabled", "AddJavascriptInterface")
-    override fun onCreate(savedInstanceState: Bundle?) {
+    @SuppressLint(
+        "SetJavaScriptEnabled",
+        "AddJavascriptInterface"
+    )
+    override fun onCreate(
+        savedInstanceState: Bundle?
+    ) {
 
         super.onCreate(savedInstanceState)
 
-        // Keep display awake while playing.
         window.addFlags(
             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
         )
@@ -255,7 +311,6 @@ class MainActivity : Activity() {
 
             setSupportZoom(false)
 
-            // Desktop browser user agent.
             userAgentString =
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
                 "AppleWebKit/537.36 (KHTML, like Gecko) " +
@@ -272,43 +327,50 @@ class MainActivity : Activity() {
         )
 
         // ========================================================
-        // CHROME CLIENT
-        // Handles HTML5 fullscreen.
+        // FULLSCREEN
         // ========================================================
 
-        webView.webChromeClient = chromeClient
+        webView.webChromeClient =
+            chromeClient
 
         // ========================================================
         // WEBVIEW CLIENT
         // ========================================================
 
-        webView.webViewClient = object : WebViewClient() {
+        webView.webViewClient =
+            object : WebViewClient() {
 
-            override fun onPageFinished(
-                view: WebView?,
-                url: String?
-            ) {
+                override fun onPageFinished(
+                    view: WebView?,
+                    url: String?
+                ) {
 
-                super.onPageFinished(view, url)
-
-                try {
-
-                    val controller =
-                        assets.open("controller.js")
-                            .bufferedReader()
-                            .use { it.readText() }
-
-                    view?.evaluateJavascript(
-                        controller,
-                        null
+                    super.onPageFinished(
+                        view,
+                        url
                     )
 
-                } catch (e: Exception) {
+                    try {
 
-                    e.printStackTrace()
+                        val controller =
+                            assets
+                                .open("controller.js")
+                                .bufferedReader()
+                                .use {
+                                    it.readText()
+                                }
+
+                        view?.evaluateJavascript(
+                            controller,
+                            null
+                        )
+
+                    } catch (e: Exception) {
+
+                        e.printStackTrace()
+                    }
                 }
             }
-        }
 
         // ========================================================
         // LOAD GAME
@@ -318,27 +380,26 @@ class MainActivity : Activity() {
 
         webView.requestFocus()
 
-        // Start in immersive fullscreen.
-        enterFullscreen()
+        enterImmersiveFullscreen()
     }
 
     // ============================================================
-    // KEEP FULLSCREEN WHEN WINDOW REGAINS FOCUS
+    // WINDOW FOCUS
     // ============================================================
 
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
+    override fun onWindowFocusChanged(
+        hasFocus: Boolean
+    ) {
 
-        super.onWindowFocusChanged(hasFocus)
+        super.onWindowFocusChanged(
+            hasFocus
+        )
 
         if (hasFocus) {
 
-            enterFullscreen()
+            enterImmersiveFullscreen()
 
-            if (customView != null) {
-                customView?.requestFocus()
-            } else {
-                webView.requestFocus()
-            }
+            webView.requestFocus()
         }
     }
 
@@ -352,7 +413,9 @@ class MainActivity : Activity() {
 
         webView.onResume()
 
-        enterFullscreen()
+        webView.requestFocus()
+
+        enterImmersiveFullscreen()
     }
 
     // ============================================================
@@ -367,14 +430,15 @@ class MainActivity : Activity() {
     }
 
     // ============================================================
-    // BACK BUTTON
+    // BACK
     // ============================================================
 
-    @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+    @Suppress(
+        "DEPRECATION",
+        "OVERRIDE_DEPRECATION"
+    )
     override fun onBackPressed() {
 
-        // If game is in HTML5 fullscreen,
-        // exit fullscreen first.
         if (customView != null) {
 
             chromeClient.onHideCustomView()
@@ -382,7 +446,6 @@ class MainActivity : Activity() {
             return
         }
 
-        // Otherwise navigate WebView history.
         if (webView.canGoBack()) {
 
             webView.goBack()
@@ -404,6 +467,7 @@ class MainActivity : Activity() {
         }
 
         webView.stopLoading()
+
         webView.destroy()
 
         super.onDestroy()
