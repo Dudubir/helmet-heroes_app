@@ -19,6 +19,7 @@ import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.TextView
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
@@ -39,6 +40,25 @@ class MainActivity : Activity() {
             "controller_scale"
     }
 
+    // ============================================================
+    // EDITABLE CONTROLLER BUTTON DATA
+    //
+    // IMPORTANT:
+    // This is outside ControllerOverlay because Kotlin does not
+    // allow this nested class declaration in the previous scope.
+    // ============================================================
+
+    private data class ButtonData(
+        val id: String,
+        val label: String,
+        val keyCode: Int,
+        var x: Float,
+        var y: Float,
+        var width: Float,
+        var height: Float,
+        val hold: Boolean
+    )
+
     private lateinit var rootLayout: FrameLayout
     private lateinit var gameWebView: WebView
     private lateinit var controller: ControllerOverlay
@@ -48,7 +68,7 @@ class MainActivity : Activity() {
             WebChromeClient.CustomViewCallback? = null
 
     // ============================================================
-    // FULLSCREEN
+    // FULLSCREEN WEBVIEW
     // ============================================================
 
     private val chromeClient =
@@ -64,8 +84,9 @@ class MainActivity : Activity() {
                     return
                 }
 
-                // Remove an old fullscreen view if necessary.
+                // Remove previous fullscreen view.
                 fullscreenView?.let {
+
                     try {
                         rootLayout.removeView(it)
                     } catch (_: Exception) {
@@ -84,8 +105,12 @@ class MainActivity : Activity() {
                 params.gravity =
                     Gravity.CENTER
 
-                // IMPORTANT:
-                // Fullscreen game is inserted BELOW controller.
+                /*
+                 * Put fullscreen game at index 0.
+                 *
+                 * The editable controller is added later and therefore
+                 * stays ABOVE the fullscreen game.
+                 */
                 rootLayout.addView(
                     view,
                     0,
@@ -105,7 +130,6 @@ class MainActivity : Activity() {
 
                 view.requestFocus()
 
-                // Controller is ALWAYS the top layer.
                 controller.visibility =
                     View.VISIBLE
 
@@ -140,7 +164,7 @@ class MainActivity : Activity() {
         }
 
     // ============================================================
-    // ANDROID BRIDGE
+    // ANDROID JAVASCRIPT BRIDGE
     // ============================================================
 
     inner class AndroidBridge {
@@ -183,7 +207,7 @@ class MainActivity : Activity() {
     }
 
     // ============================================================
-    // FULLSCREEN REQUEST
+    // REQUEST GAME FULLSCREEN
     // ============================================================
 
     private fun requestFullscreen() {
@@ -279,7 +303,7 @@ class MainActivity : Activity() {
     }
 
     // ============================================================
-    // SEND KEY TO THE ACTUAL GAME VIEW
+    // SEND KEY TO GAME
     // ============================================================
 
     private fun sendKeyToGame(
@@ -319,17 +343,15 @@ class MainActivity : Activity() {
                 )
 
             /*
-             * IMPORTANT:
-             *
-             * The event is sent directly to the actual game
-             * fullscreen View when Helmet Heroes is fullscreen.
+             * Send directly to the fullscreen game view.
              */
             target.dispatchKeyEvent(
                 event
             )
 
             /*
-             * Additional fallback for the normal WebView.
+             * Additional JavaScript fallback when the target
+             * is the normal WebView.
              */
             if (
                 target is WebView
@@ -347,7 +369,7 @@ class MainActivity : Activity() {
     }
 
     // ============================================================
-    // JAVASCRIPT FALLBACK
+    // JAVASCRIPT KEYBOARD FALLBACK
     // ============================================================
 
     private fun injectBrowserEvent(
@@ -542,7 +564,7 @@ class MainActivity : Activity() {
     }
 
     // ============================================================
-    // KEY CONVERSION
+    // KEY NAME -> ANDROID KEYCODE
     // ============================================================
 
     private fun keyCodeFromName(
@@ -611,23 +633,12 @@ class MainActivity : Activity() {
     }
 
     // ============================================================
-    // CONTROLLER
+    // EDITABLE CONTROLLER
     // ============================================================
 
     inner class ControllerOverlay(
         activity: Activity
     ) : FrameLayout(activity) {
-
-        private data class ButtonData(
-            val id: String,
-            val label: String,
-            val keyCode: Int,
-            var x: Float,
-            var y: Float,
-            var width: Float,
-            var height: Float,
-            val hold: Boolean
-        )
 
         private val prefs =
             getSharedPreferences(
@@ -665,6 +676,9 @@ class MainActivity : Activity() {
         private var scaleLabel:
                 TextView? = null
 
+        private var toolbar:
+                FrameLayout? = null
+
         init {
 
             isClickable =
@@ -682,6 +696,8 @@ class MainActivity : Activity() {
             post {
 
                 buildController()
+
+                loadSavedPositions()
 
                 applyPositions()
             }
@@ -836,6 +852,10 @@ class MainActivity : Activity() {
 
             buttonViews.clear()
 
+            toolbar = null
+            editButton = null
+            scaleLabel = null
+
             for (data in buttons) {
 
                 val button =
@@ -851,7 +871,7 @@ class MainActivity : Activity() {
         }
 
         // ========================================================
-        // BUTTON
+        // CREATE GAME BUTTON
         // ========================================================
 
         private fun makeButton(
@@ -875,7 +895,7 @@ class MainActivity : Activity() {
 
             button.textSize =
                 if (
-                    data.label == "ATTACK"
+                    data.id == "ATTACK"
                 ) {
                     12f
                 } else {
@@ -903,7 +923,7 @@ class MainActivity : Activity() {
         }
 
         // ========================================================
-        // TOUCH HANDLER
+        // BUTTON TOUCH HANDLER
         // ========================================================
 
         private fun createTouchHandler(
@@ -952,17 +972,14 @@ class MainActivity : Activity() {
                         moved =
                             false
 
-                        if (editMode) {
+                        button.alpha =
+                            0.65f
 
-                            button.alpha =
-                                0.65f
+                        if (editMode) {
 
                             true
 
                         } else {
-
-                            button.alpha =
-                                0.65f
 
                             if (data.hold) {
 
@@ -978,8 +995,10 @@ class MainActivity : Activity() {
 
                             } else {
 
-                                // NORMAL BUTTON:
-                                // immediate tap.
+                                /*
+                                 * W/A/S/D/E/M/N/B/ESC:
+                                 * quick tap only.
+                                 */
                                 pressKey(
                                     data.keyCode
                                 )
@@ -1006,10 +1025,8 @@ class MainActivity : Activity() {
                                         downY
 
                             if (
-                                kotlin.math.abs(dx) >
-                                4f ||
-                                kotlin.math.abs(dy) >
-                                4f
+                                abs(dx) > 4f ||
+                                abs(dy) > 4f
                             ) {
 
                                 moved =
@@ -1032,8 +1049,8 @@ class MainActivity : Activity() {
                         } else {
 
                             /*
-                             * Attack remains held while finger
-                             * remains down.
+                             * ATTACK remains held until
+                             * ACTION_UP / ACTION_CANCEL.
                              */
                             true
                         }
@@ -1119,8 +1136,8 @@ class MainActivity : Activity() {
                 height.toFloat()
 
             if (
-                screenWidth <= 0 ||
-                screenHeight <= 0
+                screenWidth <= 0f ||
+                screenHeight <= 0f
             ) {
                 return
             }
@@ -1129,15 +1146,13 @@ class MainActivity : Activity() {
                 (
                     dx /
                             screenWidth
-                ) *
-                        100f
+                ) * 100f
 
             val dyPercent =
                 (
                     dy /
                             screenHeight
-                ) *
-                        100f
+                ) * 100f
 
             data.x =
                 clamp(
@@ -1161,7 +1176,7 @@ class MainActivity : Activity() {
         }
 
         // ========================================================
-        // APPLY POSITIONS
+        // APPLY ALL POSITIONS
         // ========================================================
 
         private fun applyPositions() {
@@ -1176,6 +1191,10 @@ class MainActivity : Activity() {
             applyToolbarPosition()
         }
 
+        // ========================================================
+        // APPLY INDIVIDUAL BUTTON POSITION
+        // ========================================================
+
         private fun applyPosition(
             data: ButtonData
         ) {
@@ -1184,15 +1203,9 @@ class MainActivity : Activity() {
                 buttonViews[data.id]
                     ?: return
 
-            val screenWidth =
-                width
-
-            val screenHeight =
-                height
-
             if (
-                screenWidth <= 0 ||
-                screenHeight <= 0
+                width <= 0 ||
+                height <= 0
             ) {
                 return
             }
@@ -1216,21 +1229,25 @@ class MainActivity : Activity() {
 
             val left =
                 (
-                    screenWidth *
+                    width *
                             data.x /
                             100f
                     ).toInt()
 
             val top =
                 (
-                    screenHeight *
+                    height *
                             data.y /
                             100f
                     ).toInt()
 
             val params =
                 button.layoutParams
-                    as FrameLayout.LayoutParams
+                    as? FrameLayout.LayoutParams
+                    ?: FrameLayout.LayoutParams(
+                        widthPx,
+                        heightPx
+                    )
 
             params.width =
                 widthPx
@@ -1249,35 +1266,24 @@ class MainActivity : Activity() {
         }
 
         // ========================================================
-        // EDIT TOOLBAR
+        // CREATE EDIT TOOLBAR
         // ========================================================
 
         private fun createEditToolbar() {
 
-            val toolbar =
+            val newToolbar =
                 FrameLayout(
                     this@MainActivity
                 )
 
-            toolbar.tag =
+            toolbar =
+                newToolbar
+
+            newToolbar.tag =
                 "controller_toolbar"
 
-            val toolbarParams =
-                FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-
-            toolbarParams.gravity =
-                Gravity.TOP or
-                        Gravity.CENTER_HORIZONTAL
-
-            toolbarParams.topMargin =
-                dp(10)
-
             addView(
-                toolbar,
-                toolbarParams
+                newToolbar
             )
 
             editButton =
@@ -1299,11 +1305,6 @@ class MainActivity : Activity() {
                     "−"
                 )
 
-            val plusButton =
-                createToolbarButton(
-                    "+"
-                )
-
             scaleLabel =
                 createToolbarButton(
                     String.format(
@@ -1313,28 +1314,29 @@ class MainActivity : Activity() {
                     )
                 )
 
-            toolbar.addView(
+            val plusButton =
+                createToolbarButton(
+                    "+"
+                )
+
+            newToolbar.addView(
                 editButton
             )
 
-            toolbar.addView(
+            newToolbar.addView(
                 resetButton
             )
 
-            toolbar.addView(
+            newToolbar.addView(
                 minusButton
             )
 
-            toolbar.addView(
+            newToolbar.addView(
                 scaleLabel
             )
 
-            toolbar.addView(
+            newToolbar.addView(
                 plusButton
-            )
-
-            arrangeToolbar(
-                toolbar
             )
 
             editButton?.setOnClickListener {
@@ -1368,8 +1370,7 @@ class MainActivity : Activity() {
 
                 controllerScale =
                     clamp(
-                        controllerScale -
-                                0.1f,
+                        controllerScale - 0.1f,
                         0.6f,
                         1.8f
                     )
@@ -1385,8 +1386,7 @@ class MainActivity : Activity() {
 
                 controllerScale =
                     clamp(
-                        controllerScale +
-                                0.1f,
+                        controllerScale + 0.1f,
                         0.6f,
                         1.8f
                     )
@@ -1399,6 +1399,77 @@ class MainActivity : Activity() {
             }
 
             updateEditAppearance()
+
+            post {
+
+                applyToolbarPosition()
+            }
+        }
+
+        // ========================================================
+        // FIXED TOOLBAR POSITION FUNCTION
+        //
+        // This was the second compile error:
+        // "Unresolved reference: applyToolbarPosition"
+        //
+        // The toolbar is always centered horizontally at the top.
+        // ========================================================
+
+        private fun applyToolbarPosition() {
+
+            val currentToolbar =
+                toolbar
+                    ?: return
+
+            if (
+                width <= 0 ||
+                height <= 0
+            ) {
+                return
+            }
+
+            val params =
+                currentToolbar.layoutParams
+                    as? FrameLayout.LayoutParams
+                    ?: FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        dp(36)
+                    )
+
+            params.width =
+                ViewGroup.LayoutParams.WRAP_CONTENT
+
+            params.height =
+                ViewGroup.LayoutParams.WRAP_CONTENT
+
+            params.gravity =
+                Gravity.TOP or
+                        Gravity.CENTER_HORIZONTAL
+
+            params.topMargin =
+                dp(8)
+
+            params.leftMargin =
+                0
+
+            params.rightMargin =
+                0
+
+            currentToolbar.layoutParams =
+                params
+
+            currentToolbar.measure(
+                MeasureSpec.makeMeasureSpec(
+                    width,
+                    MeasureSpec.AT_MOST
+                ),
+                MeasureSpec.makeMeasureSpec(
+                    height,
+                    MeasureSpec.AT_MOST
+                )
+            )
+
+            currentToolbar.requestLayout()
         }
 
         // ========================================================
@@ -1445,10 +1516,10 @@ class MainActivity : Activity() {
                 )
 
             params.leftMargin =
-                dp(3)
+                dp(2)
 
             params.rightMargin =
-                dp(3)
+                dp(2)
 
             button.layoutParams =
                 params
@@ -1456,24 +1527,8 @@ class MainActivity : Activity() {
             return button
         }
 
-        private fun arrangeToolbar(
-            toolbar: FrameLayout
-        ) {
-
-            toolbar.measure(
-                MeasureSpec.makeMeasureSpec(
-                    width,
-                    MeasureSpec.AT_MOST
-                ),
-                MeasureSpec.makeMeasureSpec(
-                    height,
-                    MeasureSpec.AT_MOST
-                )
-            )
-        }
-
         // ========================================================
-        // EDIT APPEARANCE
+        // EDIT MODE APPEARANCE
         // ========================================================
 
         private fun updateEditAppearance() {
@@ -1500,14 +1555,10 @@ class MainActivity : Activity() {
         }
 
         // ========================================================
-        // RESET
+        // RESET CONTROLLER
         // ========================================================
 
         private fun resetController() {
-
-            buttons.clear()
-
-            createButtonData()
 
             prefs.edit()
                 .clear()
@@ -1519,13 +1570,17 @@ class MainActivity : Activity() {
             editMode =
                 false
 
+            createButtonData()
+
             buildController()
+
+            loadSavedPositions()
 
             applyPositions()
         }
 
         // ========================================================
-        // SAVE POSITION
+        // SAVE BUTTON POSITION
         // ========================================================
 
         private fun saveButton(
@@ -1558,6 +1613,10 @@ class MainActivity : Activity() {
                 .apply()
         }
 
+        // ========================================================
+        // UPDATE SCALE LABEL
+        // ========================================================
+
         private fun updateScaleLabel() {
 
             scaleLabel?.text =
@@ -1588,10 +1647,31 @@ class MainActivity : Activity() {
                         data.y
                     )
             }
+
+            controllerScale =
+                prefs.getFloat(
+                    CONTROLLER_SCALE,
+                    controllerScale
+                )
+
+            editMode =
+                prefs.getBoolean(
+                    EDIT_MODE,
+                    editMode
+                )
+
+            editButton?.text =
+                if (editMode) {
+                    "DONE"
+                } else {
+                    "EDIT"
+                }
+
+            updateScaleLabel()
         }
 
         // ========================================================
-        // KEY PRESS
+        // PRESS KEY
         // ========================================================
 
         private fun pressKey(
@@ -1617,7 +1697,7 @@ class MainActivity : Activity() {
         }
 
         // ========================================================
-        // KEY RELEASE
+        // RELEASE KEY
         // ========================================================
 
         private fun releaseKey(
@@ -1643,7 +1723,7 @@ class MainActivity : Activity() {
         }
 
         // ========================================================
-        // RELEASE EVERYTHING
+        // RELEASE ALL KEYS
         // ========================================================
 
         fun releaseAllKeys() {
@@ -1656,9 +1736,7 @@ class MainActivity : Activity() {
             attackDown =
                 false
 
-            for (
-                keyCode in copy
-            ) {
+            for (keyCode in copy) {
 
                 sendKeyToGame(
                     keyCode,
@@ -1668,7 +1746,7 @@ class MainActivity : Activity() {
         }
 
         // ========================================================
-        // DRAWABLES
+        // NORMAL BUTTON BACKGROUND
         // ========================================================
 
         private fun createButtonBackground():
@@ -1700,6 +1778,10 @@ class MainActivity : Activity() {
             }
         }
 
+        // ========================================================
+        // EDIT BACKGROUND
+        // ========================================================
+
         private fun createEditBackground():
                 GradientDrawable {
 
@@ -1723,6 +1805,10 @@ class MainActivity : Activity() {
                 )
             }
         }
+
+        // ========================================================
+        // TOOLBAR BACKGROUND
+        // ========================================================
 
         private fun createToolbarBackground():
                 GradientDrawable {
@@ -1754,7 +1840,7 @@ class MainActivity : Activity() {
         }
 
         // ========================================================
-        // UTILITY
+        // DP
         // ========================================================
 
         private fun dp(
@@ -1766,6 +1852,10 @@ class MainActivity : Activity() {
                         resources.displayMetrics.density
                 ).toInt()
         }
+
+        // ========================================================
+        // CLAMP
+        // ========================================================
 
         private fun clamp(
             value: Float,
@@ -1783,7 +1873,7 @@ class MainActivity : Activity() {
         }
 
         // ========================================================
-        // KEEP CONTROLLER RESPONSIVE AFTER ROTATION/RESIZE
+        // RESIZE / ROTATION
         // ========================================================
 
         override fun onSizeChanged(
@@ -1800,20 +1890,23 @@ class MainActivity : Activity() {
                 oldh
             )
 
-            if (w > 0 && h > 0) {
-
-                loadSavedPositions()
+            if (
+                w > 0 &&
+                h > 0
+            ) {
 
                 post {
 
                     applyPositions()
+
+                    applyToolbarPosition()
                 }
             }
         }
     }
 
     // ============================================================
-    // ACTIVITY
+    // ACTIVITY CREATE
     // ============================================================
 
     @SuppressLint(
@@ -1843,9 +1936,9 @@ class MainActivity : Activity() {
             rootLayout
         )
 
-        // --------------------------------------------------------
+        // ========================================================
         // GAME WEBVIEW
-        // --------------------------------------------------------
+        // ========================================================
 
         gameWebView =
             WebView(this)
@@ -1934,15 +2027,11 @@ class MainActivity : Activity() {
             gameWebView
         )
 
-        gameWebView.loadUrl(
-            GAME_URL
-        )
-
-        // --------------------------------------------------------
-        // CONTROLLER IS CREATED LAST.
+        // ========================================================
+        // CONTROLLER
         //
-        // Therefore it is above the game.
-        // --------------------------------------------------------
+        // Controller is added AFTER WebView, so it is above it.
+        // ========================================================
 
         controller =
             ControllerOverlay(
@@ -1959,11 +2048,15 @@ class MainActivity : Activity() {
 
         controller.bringToFront()
 
+        gameWebView.loadUrl(
+            GAME_URL
+        )
+
         enterImmersive()
     }
 
     // ============================================================
-    // IMMERSIVE
+    // IMMERSIVE MODE
     // ============================================================
 
     @Suppress("DEPRECATION")
@@ -2009,6 +2102,7 @@ class MainActivity : Activity() {
             enterImmersive()
 
             controller.bringToFront()
+
         } else {
 
             controller.releaseAllKeys()
@@ -2047,7 +2141,7 @@ class MainActivity : Activity() {
     }
 
     // ============================================================
-    // BACK
+    // BACK BUTTON
     // ============================================================
 
     @Suppress(
@@ -2100,7 +2194,7 @@ class MainActivity : Activity() {
     }
 
     // ============================================================
-    // JS ESCAPE
+    // ESCAPE JAVASCRIPT STRING
     // ============================================================
 
     private fun escapeJs(
