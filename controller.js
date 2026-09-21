@@ -275,114 +275,53 @@
 
     function requestGameFullscreen() {
 
-        try {
+    try {
 
-            // ----------------------------------------------------
-            // Find the largest game element.
-            // Helmet Heroes normally uses canvas/game elements.
-            // ----------------------------------------------------
+        /*
+         * Tell Android to enter fullscreen while keeping
+         * the WebView/controller together.
+         */
 
-            var best = null;
-            var bestArea = 0;
+        if (
+            window.AndroidKeys &&
+            typeof window.AndroidKeys.key === 'function'
+        ) {
 
-            var list =
-                document.querySelectorAll(
-                    'canvas, iframe, video, embed, object'
+            window.AndroidKeys.key(
+                '__REQUEST_GAME_FULLSCREEN__',
+                true
+            );
+
+            return;
+        }
+
+        /*
+         * Browser fallback.
+         */
+
+        var root =
+            document.documentElement;
+
+        if (
+            root.requestFullscreen
+        ) {
+
+            var p =
+                root.requestFullscreen();
+
+            if (
+                p &&
+                typeof p.catch === 'function'
+            ) {
+
+                p.catch(
+                    function () {}
                 );
-
-            for (
-                var i = 0;
-                i < list.length;
-                i++
-            ) {
-
-                var r =
-                    list[i].getBoundingClientRect();
-
-                var area =
-                    r.width * r.height;
-
-                if (
-                    area > bestArea
-                ) {
-
-                    bestArea = area;
-                    best = list[i];
-                }
             }
+        }
 
-            // ----------------------------------------------------
-            // Prefer the actual game element.
-            // ----------------------------------------------------
-
-            if (best) {
-
-                if (
-                    best.requestFullscreen
-                ) {
-
-                    var result =
-                        best.requestFullscreen();
-
-                    if (
-                        result &&
-                        typeof result.catch === 'function'
-                    ) {
-
-                        result.catch(
-                            function () {}
-                        );
-                    }
-
-                    return;
-                }
-
-                if (
-                    best.webkitRequestFullscreen
-                ) {
-
-                    best.webkitRequestFullscreen();
-
-                    return;
-                }
-            }
-
-            // ----------------------------------------------------
-            // Fallback to document element.
-            // ----------------------------------------------------
-
-            var root =
-                document.documentElement;
-
-            if (
-                root.requestFullscreen
-            ) {
-
-                var result2 =
-                    root.requestFullscreen();
-
-                if (
-                    result2 &&
-                    typeof result2.catch === 'function'
-                ) {
-
-                    result2.catch(
-                        function () {}
-                    );
-                }
-
-                return;
-            }
-
-            if (
-                root.webkitRequestFullscreen
-            ) {
-
-                root.webkitRequestFullscreen();
-            }
-
-        } catch (e) {}
-    }
+    } catch (e) {}
+}
 
     // ============================================================
     // EXIT FULLSCREEN
