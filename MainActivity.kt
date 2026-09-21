@@ -21,8 +21,10 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
@@ -33,16 +35,21 @@ class MainActivity : Activity() {
     // ================================================================
 
     companion object {
-        private const val GAME_URL = "https://www.helmet-heroes.com/"
+        private const val GAME_URL =
+            "https://www.helmet-heroes.com/"
 
-        private const val PREFS_NAME = "controller_preferences"
-        private const val PREF_SCALE = "controller_scale"
+        private const val PREFS_NAME =
+            "controller_preferences"
 
-        private const val IMMERSIVE_DELAY = 250L
+        private const val PREF_SCALE =
+            "controller_scale"
+
+        private const val IMMERSIVE_DELAY =
+            250L
     }
 
     // ================================================================
-    // ACTIVITY VIEWS
+    // MAIN VIEWS
     // ================================================================
 
     private lateinit var rootLayout: FrameLayout
@@ -50,18 +57,21 @@ class MainActivity : Activity() {
     private lateinit var controller: ControllerOverlay
 
     private var fullscreenView: View? = null
-    private var fullscreenCallback: WebChromeClient.CustomViewCallback? = null
+    private var fullscreenCallback:
+        WebChromeClient.CustomViewCallback? = null
 
-    private val mainHandler = Handler(Looper.getMainLooper())
+    private val mainHandler =
+        Handler(Looper.getMainLooper())
 
     // ================================================================
     // ACTIVE KEYS
     // ================================================================
 
-    private val activeKeys = mutableSetOf<Int>()
+    private val activeKeys =
+        mutableSetOf<Int>()
 
     // ================================================================
-    // CONTROLLER BUTTON DATA
+    // BUTTON DATA
     // ================================================================
 
     private data class ButtonData(
@@ -76,28 +86,37 @@ class MainActivity : Activity() {
     )
 
     // ================================================================
-    // ACTIVITY CREATE
+    // ON CREATE
     // ================================================================
 
-    override fun onCreate(savedInstanceState: Bundle?) {
+    override fun onCreate(
+        savedInstanceState: Bundle?
+    ) {
         super.onCreate(savedInstanceState)
 
-        requestWindowFeature(Window.FEATURE_NO_TITLE)
+        requestWindowFeature(
+            Window.FEATURE_NO_TITLE
+        )
 
+        @Suppress("DEPRECATION")
         window.setFlags(
             WindowManagerFlags.FLAG_FULLSCREEN,
             WindowManagerFlags.FLAG_FULLSCREEN
         )
 
-        rootLayout = FrameLayout(this)
+        rootLayout =
+            FrameLayout(this)
 
-        rootLayout.setBackgroundColor(Color.BLACK)
+        rootLayout.setBackgroundColor(
+            Color.BLACK
+        )
 
         setContentView(rootLayout)
 
         setupGameWebView()
 
-        controller = ControllerOverlay(this)
+        controller =
+            ControllerOverlay(this)
 
         rootLayout.addView(
             controller,
@@ -108,23 +127,20 @@ class MainActivity : Activity() {
         )
 
         controller.bringToFront()
-
-        gameWebView.requestFocus()
-
-        gameWebView.post {
-            controller.bringToFront()
-        }
     }
 
     // ================================================================
-    // WEBVIEW
+    // WEBVIEW SETUP
     // ================================================================
 
     private fun setupGameWebView() {
 
-        gameWebView = WebView(this)
+        gameWebView =
+            WebView(this)
 
-        gameWebView.setBackgroundColor(Color.BLACK)
+        gameWebView.setBackgroundColor(
+            Color.BLACK
+        )
 
         gameWebView.isFocusable = true
         gameWebView.isFocusableInTouchMode = true
@@ -137,13 +153,15 @@ class MainActivity : Activity() {
 
             databaseEnabled = true
 
-            mediaPlaybackRequiresUserGesture = false
+            mediaPlaybackRequiresUserGesture =
+                false
 
             allowFileAccess = true
 
             allowContentAccess = true
 
-            javaScriptCanOpenWindowsAutomatically = true
+            javaScriptCanOpenWindowsAutomatically =
+                true
 
             setSupportMultipleWindows(false)
 
@@ -151,60 +169,77 @@ class MainActivity : Activity() {
 
             useWideViewPort = true
 
-            cacheMode = WebSettings.LOAD_DEFAULT
+            cacheMode =
+                WebSettings.LOAD_DEFAULT
 
             builtInZoomControls = false
+
             displayZoomControls = false
 
             setSupportZoom(false)
 
             userAgentString =
-                userAgentString + " GameWrapper/1.0"
+                userAgentString +
+                        " GameWrapper/1.0"
         }
 
-        gameWebView.webViewClient = object : WebViewClient() {
+        gameWebView.webViewClient =
+            object : WebViewClient() {
 
-            override fun shouldOverrideUrlLoading(
-                view: WebView?,
-                url: String?
-            ): Boolean {
+                override fun shouldOverrideUrlLoading(
+                    view: WebView?,
+                    url: String?
+                ): Boolean {
 
-                if (!url.isNullOrEmpty()) {
-                    view?.loadUrl(url)
+                    if (
+                        view != null &&
+                        !url.isNullOrEmpty()
+                    ) {
+                        view.loadUrl(url)
+                    }
+
+                    return true
                 }
 
-                return true
+                override fun onPageFinished(
+                    view: WebView?,
+                    url: String?
+                ) {
+
+                    super.onPageFinished(
+                        view,
+                        url
+                    )
+
+                    injectKeyboardBridge()
+
+                    controller.bringToFront()
+                }
             }
 
-            override fun onPageFinished(
-                view: WebView?,
-                url: String?
-            ) {
-                super.onPageFinished(view, url)
+        gameWebView.webChromeClient =
+            object : WebChromeClient() {
 
-                injectKeyboardBridge()
+                override fun onShowCustomView(
+                    view: View?,
+                    callback:
+                        CustomViewCallback?
+                ) {
 
-                controller.bringToFront()
-            }
-        }
+                    if (view == null) {
+                        return
+                    }
 
-        gameWebView.webChromeClient = object : WebChromeClient() {
-
-            override fun onShowCustomView(
-                view: View?,
-                callback: CustomViewCallback?
-            ) {
-                if (view == null) {
-                    return
+                    showFullscreenView(
+                        view,
+                        callback
+                    )
                 }
 
-                showFullscreenView(view, callback)
+                override fun onHideCustomView() {
+                    hideFullscreenView()
+                }
             }
-
-            override fun onHideCustomView() {
-                hideFullscreenView()
-            }
-        }
 
         gameWebView.addJavascriptInterface(
             AndroidBridge(),
@@ -239,16 +274,25 @@ class MainActivity : Activity() {
                 return
             }
 
-            if (name == "__REQUEST_GAME_FULLSCREEN__") {
+            if (
+                name ==
+                "__REQUEST_GAME_FULLSCREEN__"
+            ) {
+
                 mainHandler.post {
                     enterBrowserFullscreen()
                 }
+
                 return
             }
 
-            val keyCode = keyCodeFromName(name)
+            val keyCode =
+                keyCodeFromName(name)
 
-            if (keyCode == KeyEvent.KEYCODE_UNKNOWN) {
+            if (
+                keyCode ==
+                KeyEvent.KEYCODE_UNKNOWN
+            ) {
                 return
             }
 
@@ -264,77 +308,79 @@ class MainActivity : Activity() {
     }
 
     // ================================================================
-    // KEY NAME -> ANDROID KEY CODE
+    // KEY NAME TO KEY CODE
     // ================================================================
 
-    private fun keyCodeFromName(name: String): Int {
+    private fun keyCodeFromName(
+        name: String
+    ): Int {
 
-        return when (name.uppercase()) {
+        return when (
+            name.uppercase()
+        ) {
 
-            "W" -> KeyEvent.KEYCODE_W
-            "A" -> KeyEvent.KEYCODE_A
-            "S" -> KeyEvent.KEYCODE_S
-            "D" -> KeyEvent.KEYCODE_D
+            "W" ->
+                KeyEvent.KEYCODE_W
 
-            "E" -> KeyEvent.KEYCODE_E
-            "M" -> KeyEvent.KEYCODE_M
-            "N" -> KeyEvent.KEYCODE_N
-            "B" -> KeyEvent.KEYCODE_B
+            "A" ->
+                KeyEvent.KEYCODE_A
+
+            "S" ->
+                KeyEvent.KEYCODE_S
+
+            "D" ->
+                KeyEvent.KEYCODE_D
+
+            "E" ->
+                KeyEvent.KEYCODE_E
+
+            "M" ->
+                KeyEvent.KEYCODE_M
+
+            "N" ->
+                KeyEvent.KEYCODE_N
+
+            "B" ->
+                KeyEvent.KEYCODE_B
 
             "ESC",
-            "ESCAPE" -> KeyEvent.KEYCODE_ESCAPE
+            "ESCAPE" ->
+                KeyEvent.KEYCODE_ESCAPE
 
             "SPACE",
-            "ATTACK" -> KeyEvent.KEYCODE_SPACE
+            "ATTACK" ->
+                KeyEvent.KEYCODE_SPACE
 
-            "ENTER" -> KeyEvent.KEYCODE_ENTER
-            "SHIFT" -> KeyEvent.KEYCODE_SHIFT_LEFT
+            "ENTER" ->
+                KeyEvent.KEYCODE_ENTER
+
+            "SHIFT" ->
+                KeyEvent.KEYCODE_SHIFT_LEFT
+
             "CTRL",
-            "CONTROL" -> KeyEvent.KEYCODE_CTRL_LEFT
-            "ALT" -> KeyEvent.KEYCODE_ALT_LEFT
-            "TAB" -> KeyEvent.KEYCODE_TAB
+            "CONTROL" ->
+                KeyEvent.KEYCODE_CTRL_LEFT
 
-            "UP" -> KeyEvent.KEYCODE_DPAD_UP
-            "DOWN" -> KeyEvent.KEYCODE_DPAD_DOWN
-            "LEFT" -> KeyEvent.KEYCODE_DPAD_LEFT
-            "RIGHT" -> KeyEvent.KEYCODE_DPAD_RIGHT
+            "ALT" ->
+                KeyEvent.KEYCODE_ALT_LEFT
 
-            else -> KeyEvent.KEYCODE_UNKNOWN
-        }
-    }
+            "TAB" ->
+                KeyEvent.KEYCODE_TAB
 
-    // ================================================================
-    // SEND KEY TO GAME
-    // ================================================================
+            "UP" ->
+                KeyEvent.KEYCODE_DPAD_UP
 
-    private fun sendKeyToGame(
-        keyCode: Int,
-        action: Int
-    ) {
+            "DOWN" ->
+                KeyEvent.KEYCODE_DPAD_DOWN
 
-        val target = fullscreenView ?: gameWebView
+            "LEFT" ->
+                KeyEvent.KEYCODE_DPAD_LEFT
 
-        val eventTime = System.currentTimeMillis()
+            "RIGHT" ->
+                KeyEvent.KEYCODE_DPAD_RIGHT
 
-        val event = KeyEvent(
-            eventTime,
-            eventTime,
-            action,
-            keyCode,
-            0
-        )
-
-        try {
-            target.dispatchKeyEvent(event)
-        } catch (_: Exception) {
-        }
-
-        if (target is WebView) {
-            injectKeyboardEvent(
-                target,
-                keyCode,
-                action == KeyEvent.ACTION_DOWN
-            )
+            else ->
+                KeyEvent.KEYCODE_UNKNOWN
         }
     }
 
@@ -342,13 +388,20 @@ class MainActivity : Activity() {
     // PRESS KEY
     // ================================================================
 
-    private fun pressKey(keyCode: Int) {
+    private fun pressKey(
+        keyCode: Int
+    ) {
 
-        if (keyCode == KeyEvent.KEYCODE_UNKNOWN) {
+        if (
+            keyCode ==
+            KeyEvent.KEYCODE_UNKNOWN
+        ) {
             return
         }
 
-        if (activeKeys.contains(keyCode)) {
+        if (
+            activeKeys.contains(keyCode)
+        ) {
             return
         }
 
@@ -364,9 +417,14 @@ class MainActivity : Activity() {
     // RELEASE KEY
     // ================================================================
 
-    private fun releaseKey(keyCode: Int) {
+    private fun releaseKey(
+        keyCode: Int
+    ) {
 
-        if (keyCode == KeyEvent.KEYCODE_UNKNOWN) {
+        if (
+            keyCode ==
+            KeyEvent.KEYCODE_UNKNOWN
+        ) {
             return
         }
 
@@ -379,10 +437,12 @@ class MainActivity : Activity() {
     }
 
     // ================================================================
-    // QUICK TAP
+    // TAP KEY
     // ================================================================
 
-    private fun tapKey(keyCode: Int) {
+    private fun tapKey(
+        keyCode: Int
+    ) {
 
         pressKey(keyCode)
 
@@ -390,12 +450,13 @@ class MainActivity : Activity() {
     }
 
     // ================================================================
-    // RELEASE ALL KEYS
+    // RELEASE ALL
     // ================================================================
 
     private fun releaseAllKeys() {
 
-        val keys = activeKeys.toList()
+        val keys =
+            activeKeys.toList()
 
         for (key in keys) {
             releaseKey(key)
@@ -405,7 +466,95 @@ class MainActivity : Activity() {
     }
 
     // ================================================================
-    // JAVASCRIPT KEYBOARD FALLBACK
+    // SEND KEY TO GAME
+    // ================================================================
+
+    private fun sendKeyToGame(
+        keyCode: Int,
+        action: Int
+    ) {
+
+        val target =
+            fullscreenView
+                ?: gameWebView
+
+        val eventTime =
+            System.currentTimeMillis()
+
+        val event =
+            KeyEvent(
+                eventTime,
+                eventTime,
+                action,
+                keyCode,
+                0
+            )
+
+        try {
+            target.dispatchKeyEvent(
+                event
+            )
+        } catch (_: Exception) {
+        }
+
+        if (
+            target is WebView
+        ) {
+
+            injectKeyboardEvent(
+                target,
+                keyCode,
+                action ==
+                        KeyEvent.ACTION_DOWN
+            )
+        }
+    }
+
+    // ================================================================
+    // JAVASCRIPT KEYBOARD BRIDGE
+    // ================================================================
+
+    private fun injectKeyboardBridge() {
+
+        val javascript = """
+            (function() {
+                try {
+                    if (!window.__AndroidKeyboardBridgeInstalled) {
+                        window.__AndroidKeyboardBridgeInstalled = true;
+
+                        window.__AndroidGameKey = function(name, down) {
+                            try {
+                                if (window.AndroidController &&
+                                    typeof window.AndroidController.sendKey === "function") {
+
+                                    window.AndroidController.sendKey(
+                                        name,
+                                        down
+                                    );
+                                }
+                            } catch (e) {}
+                        };
+                    }
+                } catch (e) {}
+            })();
+        """.trimIndent()
+
+        try {
+
+            gameWebView.post {
+
+                gameWebView.evaluateJavascript(
+                    javascript,
+                    null
+                )
+            }
+
+        } catch (_: Exception) {
+        }
+    }
+
+    // ================================================================
+    // JAVASCRIPT KEY EVENT
     // ================================================================
 
     private fun injectKeyboardEvent(
@@ -414,130 +563,187 @@ class MainActivity : Activity() {
         down: Boolean
     ) {
 
-        val keyName = when (keyCode) {
+        val keyName: String
+        val codeName: String
 
-            KeyEvent.KEYCODE_W -> "w"
-            KeyEvent.KEYCODE_A -> "a"
-            KeyEvent.KEYCODE_S -> "s"
-            KeyEvent.KEYCODE_D -> "d"
+        when (keyCode) {
 
-            KeyEvent.KEYCODE_E -> "e"
-            KeyEvent.KEYCODE_M -> "m"
-            KeyEvent.KEYCODE_N -> "n"
-            KeyEvent.KEYCODE_B -> "b"
+            KeyEvent.KEYCODE_W -> {
+                keyName = "w"
+                codeName = "KeyW"
+            }
 
-            KeyEvent.KEYCODE_ESCAPE -> "Escape"
+            KeyEvent.KEYCODE_A -> {
+                keyName = "a"
+                codeName = "KeyA"
+            }
 
-            KeyEvent.KEYCODE_SPACE -> " "
+            KeyEvent.KEYCODE_S -> {
+                keyName = "s"
+                codeName = "KeyS"
+            }
 
-            KeyEvent.KEYCODE_ENTER -> "Enter"
+            KeyEvent.KEYCODE_D -> {
+                keyName = "d"
+                codeName = "KeyD"
+            }
+
+            KeyEvent.KEYCODE_E -> {
+                keyName = "e"
+                codeName = "KeyE"
+            }
+
+            KeyEvent.KEYCODE_M -> {
+                keyName = "m"
+                codeName = "KeyM"
+            }
+
+            KeyEvent.KEYCODE_N -> {
+                keyName = "n"
+                codeName = "KeyN"
+            }
+
+            KeyEvent.KEYCODE_B -> {
+                keyName = "b"
+                codeName = "KeyB"
+            }
+
+            KeyEvent.KEYCODE_ESCAPE -> {
+                keyName = "Escape"
+                codeName = "Escape"
+            }
+
+            KeyEvent.KEYCODE_SPACE -> {
+                keyName = " "
+                codeName = "Space"
+            }
+
+            KeyEvent.KEYCODE_ENTER -> {
+                keyName = "Enter"
+                codeName = "Enter"
+            }
 
             KeyEvent.KEYCODE_SHIFT_LEFT,
-            KeyEvent.KEYCODE_SHIFT_RIGHT -> "Shift"
+            KeyEvent.KEYCODE_SHIFT_RIGHT -> {
+                keyName = "Shift"
+                codeName = "ShiftLeft"
+            }
 
             KeyEvent.KEYCODE_CTRL_LEFT,
-            KeyEvent.KEYCODE_CTRL_RIGHT -> "Control"
+            KeyEvent.KEYCODE_CTRL_RIGHT -> {
+                keyName = "Control"
+                codeName = "ControlLeft"
+            }
 
             KeyEvent.KEYCODE_ALT_LEFT,
-            KeyEvent.KEYCODE_ALT_RIGHT -> "Alt"
+            KeyEvent.KEYCODE_ALT_RIGHT -> {
+                keyName = "Alt"
+                codeName = "AltLeft"
+            }
 
-            KeyEvent.KEYCODE_TAB -> "Tab"
+            KeyEvent.KEYCODE_TAB -> {
+                keyName = "Tab"
+                codeName = "Tab"
+            }
 
-            KeyEvent.KEYCODE_DPAD_UP -> "ArrowUp"
-            KeyEvent.KEYCODE_DPAD_DOWN -> "ArrowDown"
-            KeyEvent.KEYCODE_DPAD_LEFT -> "ArrowLeft"
-            KeyEvent.KEYCODE_DPAD_RIGHT -> "ArrowRight"
+            KeyEvent.KEYCODE_DPAD_UP -> {
+                keyName = "ArrowUp"
+                codeName = "ArrowUp"
+            }
 
-            else -> return
+            KeyEvent.KEYCODE_DPAD_DOWN -> {
+                keyName = "ArrowDown"
+                codeName = "ArrowDown"
+            }
+
+            KeyEvent.KEYCODE_DPAD_LEFT -> {
+                keyName = "ArrowLeft"
+                codeName = "ArrowLeft"
+            }
+
+            KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                keyName = "ArrowRight"
+                codeName = "ArrowRight"
+            }
+
+            else -> {
+                return
+            }
         }
 
-        val codeName = when (keyCode) {
+        val type =
+            if (down) {
+                "keydown"
+            } else {
+                "keyup"
+            }
 
-            KeyEvent.KEYCODE_W -> "KeyW"
-            KeyEvent.KEYCODE_A -> "KeyA"
-            KeyEvent.KEYCODE_S -> "KeyS"
-            KeyEvent.KEYCODE_D -> "KeyD"
-
-            KeyEvent.KEYCODE_E -> "KeyE"
-            KeyEvent.KEYCODE_M -> "KeyM"
-            KeyEvent.KEYCODE_N -> "KeyN"
-            KeyEvent.KEYCODE_B -> "KeyB"
-
-            KeyEvent.KEYCODE_ESCAPE -> "Escape"
-
-            KeyEvent.KEYCODE_SPACE -> "Space"
-
-            KeyEvent.KEYCODE_ENTER -> "Enter"
-
-            KeyEvent.KEYCODE_SHIFT_LEFT,
-            KeyEvent.KEYCODE_SHIFT_RIGHT -> "ShiftLeft"
-
-            KeyEvent.KEYCODE_CTRL_LEFT,
-            KeyEvent.KEYCODE_CTRL_RIGHT -> "ControlLeft"
-
-            KeyEvent.KEYCODE_ALT_LEFT,
-            KeyEvent.KEYCODE_ALT_RIGHT -> "AltLeft"
-
-            KeyEvent.KEYCODE_TAB -> "Tab"
-
-            KeyEvent.KEYCODE_DPAD_UP -> "ArrowUp"
-            KeyEvent.KEYCODE_DPAD_DOWN -> "ArrowDown"
-            KeyEvent.KEYCODE_DPAD_LEFT -> "ArrowLeft"
-            KeyEvent.KEYCODE_DPAD_RIGHT -> "ArrowRight"
-
-            else -> return
-        }
-
-        val type = if (down) {
-            "keydown"
-        } else {
-            "keyup"
-        }
-
-        val keyEscaped =
+        val safeKey =
             keyName
-                .replace("\\", "\\\\")
-                .replace("'", "\\'")
+                .replace(
+                    "\\",
+                    "\\\\"
+                )
+                .replace(
+                    "'",
+                    "\\'"
+                )
 
-        val codeEscaped =
+        val safeCode =
             codeName
-                .replace("\\", "\\\\")
-                .replace("'", "\\'")
+                .replace(
+                    "\\",
+                    "\\\\"
+                )
+                .replace(
+                    "'",
+                    "\\'"
+                )
 
         val javascript = """
             (function() {
                 try {
-                    var event = new KeyboardEvent('$type', {
-                        key: '$keyEscaped',
-                        code: '$codeEscaped',
-                        bubbles: true,
-                        cancelable: true,
-                        composed: true
-                    });
+
+                    var event =
+                        new KeyboardEvent(
+                            '$type',
+                            {
+                                key: '$safeKey',
+                                code: '$safeCode',
+                                bubbles: true,
+                                cancelable: true,
+                                composed: true
+                            }
+                        );
 
                     document.dispatchEvent(event);
+
                     window.dispatchEvent(event);
 
                     if (document.activeElement) {
                         document.activeElement.dispatchEvent(event);
                     }
+
                 } catch (e) {}
             })();
         """.trimIndent()
 
         try {
+
             webView.post {
+
                 webView.evaluateJavascript(
                     javascript,
                     null
                 )
             }
+
         } catch (_: Exception) {
         }
     }
 
     // ================================================================
-    // GAME FULLSCREEN REQUEST
+    // REQUEST BROWSER FULLSCREEN
     // ================================================================
 
     private fun enterBrowserFullscreen() {
@@ -548,15 +754,26 @@ class MainActivity : Activity() {
                 """
                 (function() {
                     try {
+
                         var element =
                             document.documentElement ||
                             document.body;
 
-                        if (element && element.requestFullscreen) {
+                        if (
+                            element &&
+                            element.requestFullscreen
+                        ) {
+
                             element.requestFullscreen();
-                        } else if (element && element.webkitRequestFullscreen) {
+
+                        } else if (
+                            element &&
+                            element.webkitRequestFullscreen
+                        ) {
+
                             element.webkitRequestFullscreen();
                         }
+
                     } catch (e) {}
                 })();
                 """.trimIndent(),
@@ -568,23 +785,33 @@ class MainActivity : Activity() {
     }
 
     // ================================================================
-    // SHOW FULLSCREEN VIEW
+    // SHOW ANDROID WEBVIEW FULLSCREEN
     // ================================================================
 
     private fun showFullscreenView(
         view: View,
-        callback: WebChromeClient.CustomViewCallback?
+        callback:
+            WebChromeClient.CustomViewCallback?
     ) {
 
-        if (fullscreenView != null) {
+        if (
+            fullscreenView != null
+        ) {
             hideFullscreenView()
         }
 
         fullscreenView = view
-        fullscreenCallback = callback
+
+        fullscreenCallback =
+            callback
 
         try {
-            (view.parent as? ViewGroup)?.removeView(view)
+
+            (
+                view.parent
+                    as? ViewGroup
+                )?.removeView(view)
+
         } catch (_: Exception) {
         }
 
@@ -597,16 +824,21 @@ class MainActivity : Activity() {
             )
         )
 
-        gameWebView.visibility = View.GONE
+        gameWebView.visibility =
+            View.GONE
 
         view.isFocusable = true
-        view.isFocusableInTouchMode = true
+
+        view.isFocusableInTouchMode =
+            true
 
         view.requestFocus()
 
         enterImmersiveMode()
 
-        controller.visibility = View.VISIBLE
+        controller.visibility =
+            View.VISIBLE
+
         controller.bringToFront()
 
         mainHandler.postDelayed(
@@ -618,64 +850,78 @@ class MainActivity : Activity() {
     }
 
     // ================================================================
-    // HIDE FULLSCREEN VIEW
+    // HIDE ANDROID WEBVIEW FULLSCREEN
     // ================================================================
 
     private fun hideFullscreenView() {
 
-        val view = fullscreenView
+        val view =
+            fullscreenView
 
         fullscreenView = null
 
         if (view != null) {
 
             try {
-                rootLayout.removeView(view)
+                rootLayout.removeView(
+                    view
+                )
             } catch (_: Exception) {
             }
         }
 
         try {
-            fullscreenCallback?.onCustomViewHidden()
+
+            fullscreenCallback
+                ?.onCustomViewHidden()
+
         } catch (_: Exception) {
         }
 
-        fullscreenCallback = null
+        fullscreenCallback =
+            null
 
-        gameWebView.visibility = View.VISIBLE
+        gameWebView.visibility =
+            View.VISIBLE
 
         exitImmersiveMode()
 
         gameWebView.requestFocus()
 
-        controller.visibility = View.VISIBLE
+        controller.visibility =
+            View.VISIBLE
+
         controller.bringToFront()
     }
 
     // ================================================================
-    // IMMERSIVE MODE
+    // ENTER IMMERSIVE
     // ================================================================
 
     private fun enterImmersiveMode() {
 
-        if (android.os.Build.VERSION.SDK_INT >=
+        if (
+            android.os.Build.VERSION.SDK_INT >=
             android.os.Build.VERSION_CODES.R
         ) {
 
-            window.insetsController?.let { controller ->
+            window.insetsController
+                ?.let { insetsController ->
 
-                controller.hide(
-                    WindowInsets.Type.statusBars() or
-                            WindowInsets.Type.navigationBars()
-                )
+                    insetsController.hide(
+                        WindowInsets.Type.statusBars() or
+                                WindowInsets.Type.navigationBars()
+                    )
 
-                controller.systemBarsBehavior =
-                    WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            }
+                    insetsController.systemBarsBehavior =
+                        WindowInsetsController
+                            .BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                }
 
         } else {
 
             @Suppress("DEPRECATION")
+
             window.decorView.systemUiVisibility =
                 View.SYSTEM_UI_FLAG_FULLSCREEN or
                         View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
@@ -687,30 +933,33 @@ class MainActivity : Activity() {
     }
 
     // ================================================================
-    // EXIT IMMERSIVE MODE
+    // EXIT IMMERSIVE
     // ================================================================
 
     private fun exitImmersiveMode() {
 
-        if (android.os.Build.VERSION.SDK_INT >=
+        if (
+            android.os.Build.VERSION.SDK_INT >=
             android.os.Build.VERSION_CODES.R
         ) {
 
-            window.insetsController?.show(
-                WindowInsets.Type.statusBars() or
-                        WindowInsets.Type.navigationBars()
-            )
+            window.insetsController
+                ?.show(
+                    WindowInsets.Type.statusBars() or
+                            WindowInsets.Type.navigationBars()
+                )
 
         } else {
 
             @Suppress("DEPRECATION")
+
             window.decorView.systemUiVisibility =
                 View.SYSTEM_UI_FLAG_FULLSCREEN
         }
     }
 
     // ================================================================
-    // CONTROLLER OVERLAY
+    // CONTROLLER
     // ================================================================
 
     inner class ControllerOverlay(
@@ -729,7 +978,8 @@ class MainActivity : Activity() {
         private val dataList =
             mutableListOf<ButtonData>()
 
-        private var editMode = false
+        private var editMode =
+            false
 
         private var controllerScale =
             prefs.getFloat(
@@ -737,24 +987,43 @@ class MainActivity : Activity() {
                 1.0f
             )
 
-        private lateinit var toolbar: TextView
-        private lateinit var editButton: TextView
-        private lateinit var resetButton: TextView
-        private lateinit var minusButton: TextView
-        private lateinit var plusButton: TextView
-        private lateinit var scaleText: TextView
+        // Toolbar is a LinearLayout because
+        // it contains multiple child buttons.
+        private lateinit var toolbar:
+            LinearLayout
 
-        private var toolbarWidthDp = 310
-        private var toolbarHeightDp = 48
+        private lateinit var editButton:
+            TextView
+
+        private lateinit var resetButton:
+            TextView
+
+        private lateinit var minusButton:
+            TextView
+
+        private lateinit var scaleText:
+            TextView
+
+        private lateinit var plusButton:
+            TextView
+
+        private val toolbarWidthDp =
+            310
+
+        private val toolbarHeightDp =
+            48
 
         init {
 
             setWillNotDraw(false)
 
             isClickable = false
+
             isFocusable = false
 
-            setBackgroundColor(Color.TRANSPARENT)
+            setBackgroundColor(
+                Color.TRANSPARENT
+            )
 
             createDefaultButtonData()
 
@@ -765,14 +1034,17 @@ class MainActivity : Activity() {
             applyScale()
 
             post {
+
                 applyPositions()
+
                 applyToolbarPosition()
+
                 bringToFront()
             }
         }
 
         // ============================================================
-        // DEFAULT BUTTON DATA
+        // DEFAULT BUTTONS
         // ============================================================
 
         private fun createDefaultButtonData() {
@@ -904,32 +1176,29 @@ class MainActivity : Activity() {
         }
 
         // ============================================================
-        // LOAD SAVED POSITIONS
+        // LOAD POSITIONS
         // ============================================================
 
         private fun loadSavedPositions() {
 
             for (data in dataList) {
 
-                val savedX =
+                data.x =
                     prefs.getFloat(
                         "x_${data.id}",
                         data.x
                     )
 
-                val savedY =
+                data.y =
                     prefs.getFloat(
                         "y_${data.id}",
                         data.y
                     )
-
-                data.x = savedX
-                data.y = savedY
             }
         }
 
         // ============================================================
-        // CREATE CONTROLLER BUTTONS
+        // CREATE BUTTONS
         // ============================================================
 
         private fun createControllerButtons() {
@@ -939,12 +1208,15 @@ class MainActivity : Activity() {
                 val button =
                     TextView(context)
 
-                button.text = data.label
+                button.text =
+                    data.label
 
                 button.gravity =
                     Gravity.CENTER
 
-                button.setTextColor(Color.WHITE)
+                button.setTextColor(
+                    Color.WHITE
+                )
 
                 button.setTypeface(
                     Typeface.DEFAULT,
@@ -952,7 +1224,10 @@ class MainActivity : Activity() {
                 )
 
                 button.textSize =
-                    if (data.id == "ATTACK") {
+                    if (
+                        data.id ==
+                        "ATTACK"
+                    ) {
                         13f
                     } else {
                         18f
@@ -965,17 +1240,20 @@ class MainActivity : Activity() {
                     2
                 )
 
-                button.setBackground(
+                button.background =
                     createButtonBackground()
-                )
 
                 button.elevation =
                     dp(5).toFloat()
 
-                button.isClickable = true
-                button.isFocusable = false
+                button.isClickable =
+                    true
 
-                button.tag = data.id
+                button.isFocusable =
+                    false
+
+                button.tag =
+                    data.id
 
                 addView(
                     button,
@@ -985,7 +1263,8 @@ class MainActivity : Activity() {
                     )
                 )
 
-                buttons[data.id] = button
+                buttons[data.id] =
+                    button
 
                 attachButtonTouchListener(
                     button,
@@ -999,7 +1278,7 @@ class MainActivity : Activity() {
         // ============================================================
 
         private fun createButtonBackground():
-                android.graphics.drawable.GradientDrawable {
+            android.graphics.drawable.GradientDrawable {
 
             val background =
                 android.graphics.drawable.GradientDrawable()
@@ -1049,14 +1328,21 @@ class MainActivity : Activity() {
 
             var dragging = false
 
-            button.setOnTouchListener { view, event ->
+            button.setOnTouchListener {
+                view,
+                event ->
 
-                when (event.actionMasked) {
+                when (
+                    event.actionMasked
+                ) {
 
                     MotionEvent.ACTION_DOWN -> {
 
-                        downX = event.rawX
-                        downY = event.rawY
+                        downX =
+                            event.rawX
+
+                        downY =
+                            event.rawY
 
                         originalLeft =
                             view.left
@@ -1064,17 +1350,26 @@ class MainActivity : Activity() {
                         originalTop =
                             view.top
 
-                        dragging = false
+                        dragging =
+                            false
 
                         if (!editMode) {
 
                             if (data.hold) {
-                                pressKey(data.keyCode)
+
+                                pressKey(
+                                    data.keyCode
+                                )
+
                             } else {
-                                tapKey(data.keyCode)
+
+                                tapKey(
+                                    data.keyCode
+                                )
                             }
 
-                            view.alpha = 0.65f
+                            view.alpha =
+                                0.65f
                         }
 
                         true
@@ -1085,32 +1380,35 @@ class MainActivity : Activity() {
                         if (editMode) {
 
                             val dx =
-                                event.rawX - downX
+                                event.rawX -
+                                        downX
 
                             val dy =
-                                event.rawY - downY
+                                event.rawY -
+                                        downY
 
                             if (
-                                kotlin.math.abs(dx) > dp(4) ||
-                                kotlin.math.abs(dy) > dp(4)
+                                abs(dx) >
+                                dp(4) ||
+                                abs(dy) >
+                                dp(4)
                             ) {
-                                dragging = true
+                                dragging =
+                                    true
                             }
-
-                            val newLeft =
-                                originalLeft + dx.toInt()
-
-                            val newTop =
-                                originalTop + dy.toInt()
 
                             moveButton(
                                 view,
-                                newLeft,
-                                newTop
+                                originalLeft +
+                                        dx.toInt(),
+                                originalTop +
+                                        dy.toInt()
                             )
 
                             true
+
                         } else {
+
                             true
                         }
                     }
@@ -1120,6 +1418,7 @@ class MainActivity : Activity() {
                         if (editMode) {
 
                             if (dragging) {
+
                                 saveButtonPosition(
                                     data,
                                     view
@@ -1129,12 +1428,14 @@ class MainActivity : Activity() {
                         } else {
 
                             if (data.hold) {
+
                                 releaseKey(
                                     data.keyCode
                                 )
                             }
 
-                            view.alpha = 1f
+                            view.alpha =
+                                1f
                         }
 
                         true
@@ -1145,12 +1446,14 @@ class MainActivity : Activity() {
                         if (!editMode) {
 
                             if (data.hold) {
+
                                 releaseKey(
                                     data.keyCode
                                 )
                             }
 
-                            view.alpha = 1f
+                            view.alpha =
+                                1f
                         }
 
                         true
@@ -1212,18 +1515,21 @@ class MainActivity : Activity() {
             view: View
         ) {
 
-            if (width <= 0 || height <= 0) {
+            if (
+                width <= 0 ||
+                height <= 0
+            ) {
                 return
             }
 
             data.x =
-                (view.left.toFloat() /
-                        width.toFloat()) *
+                view.left.toFloat() /
+                        width.toFloat() *
                         100f
 
             data.y =
-                (view.top.toFloat() /
-                        height.toFloat()) *
+                view.top.toFloat() /
+                        height.toFloat() *
                         100f
 
             prefs.edit()
@@ -1239,17 +1545,29 @@ class MainActivity : Activity() {
         }
 
         // ============================================================
-        // TOOLBAR
+        // CREATE TOOLBAR
         // ============================================================
 
         private fun createToolbar() {
 
             toolbar =
-                TextView(context)
+                LinearLayout(context)
 
-            toolbar.setBackground(
-                createToolbarBackground()
+            toolbar.orientation =
+                LinearLayout.HORIZONTAL
+
+            toolbar.gravity =
+                Gravity.CENTER
+
+            toolbar.setPadding(
+                dp(4),
+                dp(3),
+                dp(4),
+                dp(3)
             )
+
+            toolbar.background =
+                createToolbarBackground()
 
             toolbar.elevation =
                 dp(10).toFloat()
@@ -1289,7 +1607,7 @@ class MainActivity : Activity() {
 
             toolbar.addView(
                 editButton,
-                FrameLayout.LayoutParams(
+                LinearLayout.LayoutParams(
                     dp(62),
                     dp(42)
                 )
@@ -1297,7 +1615,7 @@ class MainActivity : Activity() {
 
             toolbar.addView(
                 resetButton,
-                FrameLayout.LayoutParams(
+                LinearLayout.LayoutParams(
                     dp(72),
                     dp(42)
                 )
@@ -1305,7 +1623,7 @@ class MainActivity : Activity() {
 
             toolbar.addView(
                 minusButton,
-                FrameLayout.LayoutParams(
+                LinearLayout.LayoutParams(
                     dp(42),
                     dp(42)
                 )
@@ -1313,7 +1631,7 @@ class MainActivity : Activity() {
 
             toolbar.addView(
                 scaleText,
-                FrameLayout.LayoutParams(
+                LinearLayout.LayoutParams(
                     dp(52),
                     dp(42)
                 )
@@ -1321,28 +1639,16 @@ class MainActivity : Activity() {
 
             toolbar.addView(
                 plusButton,
-                FrameLayout.LayoutParams(
+                LinearLayout.LayoutParams(
                     dp(42),
                     dp(42)
                 )
             )
 
-            toolbar.orientation =
-                FrameLayout.HORIZONTAL
-
-            toolbar.gravity =
-                Gravity.CENTER
-
-            toolbar.setPadding(
-                dp(4),
-                dp(3),
-                dp(4),
-                dp(3)
-            )
-
             editButton.setOnClickListener {
 
-                editMode = !editMode
+                editMode =
+                    !editMode
 
                 updateEditModeUI()
             }
@@ -1357,13 +1663,16 @@ class MainActivity : Activity() {
                 controllerScale =
                     max(
                         0.6f,
-                        controllerScale - 0.1f
+                        controllerScale -
+                                0.1f
                     )
 
                 saveScale()
 
                 applyScale()
+
                 applyPositions()
+
                 applyToolbarPosition()
             }
 
@@ -1372,24 +1681,30 @@ class MainActivity : Activity() {
                 controllerScale =
                     min(
                         1.8f,
-                        controllerScale + 0.1f
+                        controllerScale +
+                                0.1f
                     )
 
                 saveScale()
 
                 applyScale()
+
                 applyPositions()
+
                 applyToolbarPosition()
             }
 
             scaleText.setOnClickListener {
 
-                controllerScale = 1.0f
+                controllerScale =
+                    1.0f
 
                 saveScale()
 
                 applyScale()
+
                 applyPositions()
+
                 applyToolbarPosition()
             }
 
@@ -1407,7 +1722,8 @@ class MainActivity : Activity() {
             val view =
                 TextView(context)
 
-            view.text = text
+            view.text =
+                text
 
             view.gravity =
                 Gravity.CENTER
@@ -1416,16 +1732,16 @@ class MainActivity : Activity() {
                 Color.WHITE
             )
 
-            view.textSize = 12f
+            view.textSize =
+                12f
 
             view.setTypeface(
                 Typeface.DEFAULT,
                 Typeface.BOLD
             )
 
-            view.setBackground(
+            view.background =
                 createToolbarButtonBackground()
-            )
 
             return view
         }
@@ -1435,7 +1751,7 @@ class MainActivity : Activity() {
         // ============================================================
 
         private fun createToolbarBackground():
-                android.graphics.drawable.GradientDrawable {
+            android.graphics.drawable.GradientDrawable {
 
             val background =
                 android.graphics.drawable.GradientDrawable()
@@ -1473,7 +1789,7 @@ class MainActivity : Activity() {
         // ============================================================
 
         private fun createToolbarButtonBackground():
-                android.graphics.drawable.GradientDrawable {
+            android.graphics.drawable.GradientDrawable {
 
             val background =
                 android.graphics.drawable.GradientDrawable()
@@ -1507,57 +1823,70 @@ class MainActivity : Activity() {
         }
 
         // ============================================================
-        // UPDATE EDIT MODE
+        // EDIT MODE UI
         // ============================================================
 
         private fun updateEditModeUI() {
 
             if (editMode) {
 
-                editButton.text = "DONE"
+                editButton.text =
+                    "DONE"
 
-                for (button in buttons.values) {
-                    button.alpha = 0.85f
+                for (
+                    button in
+                    buttons.values
+                ) {
+                    button.alpha =
+                        0.85f
                 }
 
             } else {
 
-                editButton.text = "EDIT"
+                editButton.text =
+                    "EDIT"
 
-                for (button in buttons.values) {
-                    button.alpha = 1f
+                for (
+                    button in
+                    buttons.values
+                ) {
+                    button.alpha =
+                        1f
                 }
             }
         }
 
         // ============================================================
-        // APPLY SCALE
+        // SCALE
         // ============================================================
 
         private fun applyScale() {
 
-            for (data in dataList) {
+            for (
+                data in
+                dataList
+            ) {
 
                 val button =
                     buttons[data.id]
                         ?: continue
 
-                val width =
-                    dp(data.widthDp)
-                        .toFloat()
+                val newWidth =
+                    (
+                        dp(data.widthDp) *
+                                controllerScale
+                        ).toInt()
 
-                val height =
-                    dp(data.heightDp)
-                        .toFloat()
+                val newHeight =
+                    (
+                        dp(data.heightDp) *
+                                controllerScale
+                        ).toInt()
 
                 button.layoutParams =
                     FrameLayout.LayoutParams(
-                        (width *
-                                controllerScale)
-                            .toInt(),
-                        (height *
-                                controllerScale)
-                            .toInt()
+                        newWidth,
+                        newHeight
                     )
             }
 
@@ -1576,38 +1905,59 @@ class MainActivity : Activity() {
 
         private fun applyPositions() {
 
-            if (width <= 0 || height <= 0) {
+            if (
+                width <= 0 ||
+                height <= 0
+            ) {
                 return
             }
 
-            for (data in dataList) {
+            for (
+                data in
+                dataList
+            ) {
 
                 val button =
                     buttons[data.id]
                         ?: continue
 
+                if (
+                    button.width <= 0 ||
+                    button.height <= 0
+                ) {
+                    continue
+                }
+
                 val left =
                     (
                         width *
-                                (data.x / 100f)
+                                (
+                                    data.x /
+                                            100f
+                                    )
                         ).toInt()
 
                 val top =
                     (
                         height *
-                                (data.y / 100f)
+                                (
+                                    data.y /
+                                            100f
+                                    )
                         ).toInt()
 
                 val maxLeft =
                     max(
                         0,
-                        width - button.width
+                        width -
+                                button.width
                     )
 
                 val maxTop =
                     max(
                         0,
-                        height - button.height
+                        height -
+                                button.height
                     )
 
                 val finalLeft =
@@ -1625,8 +1975,10 @@ class MainActivity : Activity() {
                 button.layout(
                     finalLeft,
                     finalTop,
-                    finalLeft + button.width,
-                    finalTop + button.height
+                    finalLeft +
+                            button.width,
+                    finalTop +
+                            button.height
                 )
             }
         }
@@ -1637,26 +1989,38 @@ class MainActivity : Activity() {
 
         private fun applyToolbarPosition() {
 
-            if (!::toolbar.isInitialized) {
+            if (
+                !::toolbar.isInitialized
+            ) {
                 return
             }
 
-            if (width <= 0 || height <= 0) {
+            if (
+                width <= 0 ||
+                height <= 0
+            ) {
                 return
             }
 
             val toolbarWidth =
-                toolbar.width.takeIf {
-                    it > 0
-                } ?: dp(toolbarWidthDp)
+                if (toolbar.width > 0) {
+                    toolbar.width
+                } else {
+                    dp(toolbarWidthDp)
+                }
 
             val toolbarHeight =
-                toolbar.height.takeIf {
-                    it > 0
-                } ?: dp(toolbarHeightDp)
+                if (toolbar.height > 0) {
+                    toolbar.height
+                } else {
+                    dp(toolbarHeightDp)
+                }
 
             val left =
-                (width - toolbarWidth) / 2
+                (
+                    width -
+                            toolbarWidth
+                    ) / 2
 
             val top =
                 dp(8)
@@ -1676,7 +2040,7 @@ class MainActivity : Activity() {
         }
 
         // ============================================================
-        // ON SIZE CHANGED
+        // SIZE CHANGED
         // ============================================================
 
         override fun onSizeChanged(
@@ -1716,7 +2080,7 @@ class MainActivity : Activity() {
         }
 
         // ============================================================
-        // RESET CONTROLLER
+        // RESET
         // ============================================================
 
         private fun resetController() {
@@ -1725,14 +2089,17 @@ class MainActivity : Activity() {
                 .clear()
                 .apply()
 
-            controllerScale = 1.0f
+            controllerScale =
+                1.0f
 
             createDefaultButtonData()
 
             applyScale()
 
             post {
+
                 applyPositions()
+
                 applyToolbarPosition()
             }
 
@@ -1753,13 +2120,15 @@ class MainActivity : Activity() {
 
             return (
                 value *
-                        resources.displayMetrics.density
+                        resources
+                            .displayMetrics
+                            .density
                 ).toInt()
         }
     }
 
     // ================================================================
-    // ACTIVITY LIFECYCLE
+    // WINDOW FOCUS
     // ================================================================
 
     override fun onWindowFocusChanged(
@@ -1771,18 +2140,24 @@ class MainActivity : Activity() {
         )
 
         if (!hasFocus) {
-            releaseAllKeys()
-        }
 
-        if (hasFocus) {
+            releaseAllKeys()
+
+        } else {
 
             controller.bringToFront()
 
-            if (fullscreenView != null) {
+            if (
+                fullscreenView != null
+            ) {
                 enterImmersiveMode()
             }
         }
     }
+
+    // ================================================================
+    // PAUSE
+    // ================================================================
 
     override fun onPause() {
 
@@ -1790,6 +2165,10 @@ class MainActivity : Activity() {
 
         super.onPause()
     }
+
+    // ================================================================
+    // STOP
+    // ================================================================
 
     override fun onStop() {
 
@@ -1799,20 +2178,24 @@ class MainActivity : Activity() {
     }
 
     // ================================================================
-    // BACK BUTTON
+    // BACK
     // ================================================================
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
 
-        if (fullscreenView != null) {
+        if (
+            fullscreenView != null
+        ) {
 
             hideFullscreenView()
 
             return
         }
 
-        if (gameWebView.canGoBack()) {
+        if (
+            gameWebView.canGoBack()
+        ) {
 
             gameWebView.goBack()
 
@@ -1836,12 +2219,18 @@ class MainActivity : Activity() {
         }
 
         try {
-            gameWebView.webChromeClient = null
-            gameWebView.webViewClient = null
+
             gameWebView.removeJavascriptInterface(
                 "AndroidKeys"
             )
+
+        } catch (_: Exception) {
+        }
+
+        try {
+
             gameWebView.destroy()
+
         } catch (_: Exception) {
         }
 
@@ -1849,10 +2238,11 @@ class MainActivity : Activity() {
     }
 
     // ================================================================
-    // WINDOW MANAGER FLAGS HELPER
+    // FULLSCREEN FLAG
     // ================================================================
 
     private object WindowManagerFlags {
-        const val FLAG_FULLSCREEN: Int = 1024
+        const val FLAG_FULLSCREEN =
+            1024
     }
 }
