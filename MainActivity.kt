@@ -2,8 +2,10 @@ package com.gamewrap.app
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.pm.ApplicationInfo
 import android.os.Bundle
 import android.os.SystemClock
+import android.util.Log
 import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
@@ -17,6 +19,7 @@ class MainActivity : Activity() {
     companion object {
         // ===== PALITAN MO ITO NG LINK NG LARO MO =====
         const val GAME_URL = "https://www.helmet-heroes.com/"
+        private const val TAG = "VPAD"
     }
 
     private lateinit var webView: WebView
@@ -37,11 +40,14 @@ class MainActivity : Activity() {
     inner class KeyBridge {
         @JavascriptInterface
         fun key(name: String, down: Boolean) {
-            val code = toKeyCode(name) ?: return
+            val code = toKeyCode(name)
+            Log.d(TAG, "key() called: name=$name down=$down resolvedCode=$code")
+            if (code == null) return
             runOnUiThread {
                 val now = SystemClock.uptimeMillis()
                 val action = if (down) KeyEvent.ACTION_DOWN else KeyEvent.ACTION_UP
-                webView.dispatchKeyEvent(KeyEvent(now, now, action, code, 0))
+                val handled = webView.dispatchKeyEvent(KeyEvent(now, now, action, code, 0))
+                Log.d(TAG, "dispatchKeyEvent handled=$handled for code=$code action=$action")
             }
         }
 
@@ -50,7 +56,8 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun ensureFocus() {
             runOnUiThread {
-                webView.requestFocus()
+                val focused = webView.requestFocus()
+                Log.d(TAG, "ensureFocus() requestFocus=$focused")
             }
         }
     }
@@ -86,6 +93,13 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        // Payagan ang chrome://inspect na kumonekta sa debug builds, para
+        // makita mo ang totoong DOM at ma-verify kung dumadating ba ang
+        // keydown/keyup events sa page.
+        if (0 != (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE)) {
+            WebView.setWebContentsDebuggingEnabled(true)
+        }
 
         webView = WebView(this)
         webView.isFocusable = true
