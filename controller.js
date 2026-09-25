@@ -75,18 +75,35 @@
       Object.defineProperty(ev, 'which', { get: function () { return info.kc; } });
     } catch (e) {}
     var t = gameTarget || document.activeElement || document;
+    // Kung ang laro ay nasa loob ng same-origin <iframe>, hindi sapat na
+    // i-dispatch lang sa <iframe> element mismo — kailangan itong i-dispatch
+    // sa loob ng document/window ng iframe para marinig ng listeners nito.
+    if (t && t.tagName === 'IFRAME') {
+      try {
+        if (t.contentDocument) t.contentDocument.dispatchEvent(ev);
+        if (t.contentWindow) t.contentWindow.dispatchEvent(ev);
+      } catch (e) {
+        // Cross-origin iframe — hindi na maaabot ng JS, ang native
+        // AndroidKeys bridge na lang ang pag-asa dito.
+      }
+    }
     t.dispatchEvent(ev);
     document.dispatchEvent(ev);
   }
 
-  // Unahin ang TOTOONG Android key event (na-route sa currently-focused
-  // frame/element); fallback sa JS event kung walang Android bridge.
+  // Palaging tawagin ANG DALAWA: ang totoong Android key event (kung meron)
+  // AT ang JS-simulated na event. Dati, kapag may AndroidKeys ang bridge,
+  // agad na nagre-`return` bago pa man tumakbo ang fallbackFire — pero
+  // hindi laging maaasahan ang Chromium/WebView sa pag-convert ng
+  // programmatic dispatchKeyEvent() patungong tunay na DOM keydown/keyup,
+  // lalo na para sa character keys (WASD). Kaya ngayon, tumatakbo pareho
+  // ang dalawang paraan sa bawat press, para may backup lagi.
   function sendKey(name, down) {
     var info = keyInfo(name);
     if (!info) return;
     if (down) focusGame();
     try {
-      if (typeof window.AndroidKeys !== 'undefined') { window.AndroidKeys.key(name, down); return; }
+      if (typeof window.AndroidKeys !== 'undefined') { window.AndroidKeys.key(name, down); }
     } catch (e) {}
     fallbackFire(down ? 'keydown' : 'keyup', info);
   }
