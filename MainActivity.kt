@@ -42,13 +42,26 @@ class MainActivity : Activity() {
         fun key(name: String, down: Boolean) {
             val code = toKeyCode(name)
             Log.d(TAG, "key() called: name=$name down=$down resolvedCode=$code")
-            if (code == null) return
+            if (code == null) {
+                reportToJs("key() got unresolvable name=$name")
+                return
+            }
             runOnUiThread {
                 val now = SystemClock.uptimeMillis()
                 val action = if (down) KeyEvent.ACTION_DOWN else KeyEvent.ACTION_UP
                 val handled = webView.dispatchKeyEvent(KeyEvent(now, now, action, code, 0))
                 Log.d(TAG, "dispatchKeyEvent handled=$handled for code=$code action=$action")
+                reportToJs("dispatchKeyEvent name=$name down=$down code=$code handled=$handled")
             }
+        }
+
+        // Ipinapadala pabalik sa JS on-screen log panel ang resulta, para
+        // makita mo mismo sa telepono kung na-deliver ba ng matagumpay ang
+        // key event sa native layer — walang kailangan na adb o USB.
+        private fun reportToJs(msg: String) {
+            val escaped = msg.replace("\\", "\\\\").replace("'", "\\'")
+            val js = "if(window.__vpadNativeLog){window.__vpadNativeLog('$escaped');}"
+            runOnUiThread { webView.evaluateJavascript(js, null) }
         }
 
         // Tinatawag ng JS bago magpadala ng key, para siguraduhing may
