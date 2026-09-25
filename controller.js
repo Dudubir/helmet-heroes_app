@@ -36,6 +36,12 @@
     dlog('WINDOW SAW keyup key=' + e.key + ' code=' + e.code + ' isTrusted=' + e.isTrusted);
   }, true);
 
+  // Ito ang tatawagin ng Kotlin/Android side (via evaluateJavascript) para
+  // ipakita rito mismo sa on-screen log kung na-deliver ba nang matagumpay
+  // ang key event sa native/WebView layer — kahit walang adb o chrome
+  // remote debugging.
+  window.__vpadNativeLog = function (msg) { dlog('NATIVE: ' + msg); };
+
   var STORE = 'vpad_layout_v3', SET_STORE = 'vpad_settings_v3', HIDE_STORE = 'vpad_hidden_v3';
 
   // ---------- Key table (fallback kung walang Android bridge) ----------
@@ -84,10 +90,30 @@
     return best || document.body;
   }
 
+  function describeEl(el) {
+    if (!el) return 'null';
+    var r = el.getBoundingClientRect();
+    return el.tagName + (el.id ? '#' + el.id : '') + (el.className ? '.' + String(el.className).replace(/\s+/g, '.') : '') +
+      ' [' + Math.round(r.width) + 'x' + Math.round(r.height) + ']' +
+      (el.tagName === 'IFRAME' ? ' src=' + (el.getAttribute('src') || '(none)') : '');
+  }
+
+  function dumpPageStructure() {
+    dlog('--- PAGE STRUCTURE DUMP ---');
+    dlog('#center exists: ' + !!document.getElementById('center'));
+    dlog('.center exists: ' + !!document.querySelector('.center'));
+    var list = document.querySelectorAll('canvas,iframe,embed,object');
+    dlog('canvas/iframe/embed/object count: ' + list.length);
+    for (var i = 0; i < list.length; i++) {
+      dlog('  [' + i + '] ' + describeEl(list[i]));
+    }
+    dlog('--- END DUMP ---');
+  }
+
   function focusGame() {
     gameTarget = findGameTarget();
     if (!gameTarget) { dlog('focusGame: NO TARGET FOUND'); return; }
-    dlog('focusGame: target=' + gameTarget.tagName + (gameTarget.id ? '#' + gameTarget.id : ''));
+    dlog('focusGame: target=' + describeEl(gameTarget));
     try { if (gameTarget.tabIndex == null || gameTarget.tabIndex < 0) gameTarget.tabIndex = 0; } catch (e) {}
     try { gameTarget.focus({ preventScroll: true }); } catch (e) { try { gameTarget.focus(); } catch (e2) {} }
     try {
@@ -479,6 +505,7 @@
   }
 
   dlog('controller.js loaded. AndroidKeys=' + (typeof window.AndroidKeys));
+  dumpPageStructure();
   focusGame();
   renderTools();
   render();
