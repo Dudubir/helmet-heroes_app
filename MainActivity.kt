@@ -6,6 +6,7 @@ import android.content.pm.ApplicationInfo
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
+import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
@@ -17,152 +18,404 @@ import android.webkit.WebViewClient
 class MainActivity : Activity() {
 
     companion object {
-        // ===== PALITAN MO ITO NG LINK NG LARO MO =====
         const val GAME_URL = "https://www.helmet-heroes.com/"
         private const val TAG = "VPAD"
     }
 
     private lateinit var webView: WebView
 
-    // Tinatanggihan ang native (Android-level) fullscreen para hindi kailanman
-    // matakpan ng ibang layer ang HTML controller overlay. Ang mismong laro
-    // ay mananatiling gagamit ng sariling CSS-based fullscreen polyfill na
-    // nasa controller.js, na parte ng parehong web page kaya laging nasa
-    // ibabaw ang overlay.
+    /*
+     * Prevent Android's native fullscreen UI from taking over.
+     * The controller.js fullscreen system handles the game fullscreen
+     * inside the webpage.
+     */
     private val chromeClient = object : WebChromeClient() {
-        override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+        override fun onShowCustomView(
+            view: View?,
+            callback: CustomViewCallback?
+        ) {
             callback?.onCustomViewHidden()
         }
+
         override fun onHideCustomView() {}
     }
 
-    // Tulay: ang controller.js ay nagpapadala ng TOTOONG Android key events
+    /*
+     * JavaScript -> Android bridge.
+     *
+     * The important part is that we now create a native Android KeyEvent
+     * and send it through the WebView rather than creating a JavaScript
+     * KeyboardEvent and trying to inject it into the cross-origin iframe.
+     */
     inner class KeyBridge {
+
         @JavascriptInterface
         fun key(name: String, down: Boolean) {
+
             val code = toKeyCode(name)
-            Log.d(TAG, "key() called: name=$name down=$down resolvedCode=$code")
+
+            Log.d(
+                TAG,
+                "key() called: name=$name down=$down resolvedCode=$code"
+            )
+
             if (code == null) {
-                reportToJs("key() got unresolvable name=$name")
+                reportToJs(
+                    "ERROR: unresolvable key name=$name"
+                )
                 return
             }
+
             runOnUiThread {
+
+                /*
+                 * Make sure the WebView has native focus.
+                 */
+                webView.isFocusable = true
+                webView.isFocusableInTouchMode = true
+
+                val focusResult =
+                    webView.requestFocus(View.FOCUS_DOWN)
+
+                Log.d(
+                    TAG,
+                    "requestFocus result=$focusResult"
+                )
+
                 val now = SystemClock.uptimeMillis()
-                val action = if (down) KeyEvent.ACTION_DOWN else KeyEvent.ACTION_UP
-                val handled = webView.dispatchKeyEvent(KeyEvent(now, now, action, code, 0))
-                Log.d(TAG, "dispatchKeyEvent handled=$handled for code=$code action=$action")
-                reportToJs("dispatchKeyEvent name=$name down=$down code=$code handled=$handled")
+
+                val action =
+                    if (down) {
+                        KeyEvent.ACTION_DOWN
+                    } else {
+                        KeyEvent.ACTION_UP
+                    }
+
+                /*
+                 * Native Android keyboard event.
+                 *
+                 * This is intentionally NOT a JavaScript KeyboardEvent.
+                 */
+                val event = KeyEvent(
+                    now,
+                    now,
+                    action,
+                    code,
+                    0,
+                    0,
+                    KeyCharacterMap.VIRTUAL_KEYBOARD,
+                    0,
+                    KeyEvent.FLAG_SOFT_KEYBOARD
+                )
+
+                val handled =
+                    webView.dispatchKeyEvent(event)
+
+                Log.d(
+                    TAG,
+                    "NATIVE dispatch: " +
+                            "name=$name " +
+                            "down=$down " +
+                            "code=$code " +
+                            "action=$action " +
+                            "handled=$handled"
+                )
+
+                reportToJs(
+                    "NATIVE dispatch " +
+                            "name=$name " +
+                            "down=$down " +
+                            "code=$code " +
+                            "handled=$handled"
+                )
             }
         }
 
-        // Ipinapadala pabalik sa JS on-screen log panel ang resulta, para
-        // makita mo mismo sa telepono kung na-deliver ba ng matagumpay ang
-        // key event sa native layer — walang kailangan na adb o USB.
-        private fun reportToJs(msg: String) {
-            val escaped = msg.replace("\\", "\\\\").replace("'", "\\'")
-            val js = "if(window.__vpadNativeLog){window.__vpadNativeLog('$escaped');}"
-            runOnUiThread { webView.evaluateJavascript(js, null) }
-        }
-
-        // Tinatawag ng JS bago magpadala ng key, para siguraduhing may
-        // input focus muna ang WebView mismo.
+        /*
+         * Ask Android to give the WebView native focus.
+         */
         @JavascriptInterface
         fun ensureFocus() {
+
             runOnUiThread {
-                val focused = webView.requestFocus()
-                Log.d(TAG, "ensureFocus() requestFocus=$focused")
+
+                webView.isFocusable = true
+                webView.isFocusableInTouchMode = true
+
+                val focused =
+                    webView.requestFocus(View.FOCUS_DOWN)
+
+                Log.d(
+                    TAG,
+                    "ensureFocus() requestFocus=$focused"
+                )
+
+                reportToJs(
+                    "ensureFocus requestFocus=$focused"
+                )
+            }
+        }
+
+        /*
+         * Send native debugging information back to controller.js.
+         */
+        private fun reportToJs(msg: String) {
+
+            val escaped = msg
+                .replace("\\", "\\\\")
+                .replace("'", "\\'")
+
+            val js =
+                "if(window.__vpadNativeLog){" +
+                        "window.__vpadNativeLog('$escaped');" +
+                        "}"
+
+            runOnUiThread {
+                webView.evaluateJavascript(
+                    js,
+                    null
+                )
             }
         }
     }
 
+    /*
+     * Convert our JavaScript key names to Android KEYCODE values.
+     */
     private fun toKeyCode(n: String): Int? {
+
         if (n.length == 1) {
+
             val c = n[0].uppercaseChar()
-            if (c in 'A'..'Z') return KeyEvent.KEYCODE_A + (c - 'A')
-            if (c in '0'..'9') return KeyEvent.KEYCODE_0 + (c - '0')
+
+            if (c in 'A'..'Z') {
+                return KeyEvent.KEYCODE_A + (c - 'A')
+            }
+
+            if (c in '0'..'9') {
+                return KeyEvent.KEYCODE_0 + (c - '0')
+            }
         }
+
         if (n.length in 2..3 && n[0] == 'F') {
-            val num = n.substring(1).toIntOrNull()
-            if (num != null && num in 1..12) return KeyEvent.KEYCODE_F1 + (num - 1)
+
+            val num = n
+                .substring(1)
+                .toIntOrNull()
+
+            if (num != null && num in 1..12) {
+                return KeyEvent.KEYCODE_F1 + (num - 1)
+            }
         }
+
         return when (n) {
-            "Space" -> KeyEvent.KEYCODE_SPACE
-            "Enter" -> KeyEvent.KEYCODE_ENTER
-            "Escape" -> KeyEvent.KEYCODE_ESCAPE
-            "Tab" -> KeyEvent.KEYCODE_TAB
-            "Backspace" -> KeyEvent.KEYCODE_DEL
-            "Shift" -> KeyEvent.KEYCODE_SHIFT_LEFT
-            "Control" -> KeyEvent.KEYCODE_CTRL_LEFT
-            "Alt" -> KeyEvent.KEYCODE_ALT_LEFT
-            "ArrowUp" -> KeyEvent.KEYCODE_DPAD_UP
-            "ArrowDown" -> KeyEvent.KEYCODE_DPAD_DOWN
-            "ArrowLeft" -> KeyEvent.KEYCODE_DPAD_LEFT
-            "ArrowRight" -> KeyEvent.KEYCODE_DPAD_RIGHT
-            else -> null
+
+            "Space" ->
+                KeyEvent.KEYCODE_SPACE
+
+            "Enter" ->
+                KeyEvent.KEYCODE_ENTER
+
+            "Escape" ->
+                KeyEvent.KEYCODE_ESCAPE
+
+            "Tab" ->
+                KeyEvent.KEYCODE_TAB
+
+            "Backspace" ->
+                KeyEvent.KEYCODE_DEL
+
+            "Shift" ->
+                KeyEvent.KEYCODE_SHIFT_LEFT
+
+            "Control" ->
+                KeyEvent.KEYCODE_CTRL_LEFT
+
+            "Alt" ->
+                KeyEvent.KEYCODE_ALT_LEFT
+
+            "ArrowUp" ->
+                KeyEvent.KEYCODE_DPAD_UP
+
+            "ArrowDown" ->
+                KeyEvent.KEYCODE_DPAD_DOWN
+
+            "ArrowLeft" ->
+                KeyEvent.KEYCODE_DPAD_LEFT
+
+            "ArrowRight" ->
+                KeyEvent.KEYCODE_DPAD_RIGHT
+
+            else ->
+                null
         }
     }
 
-    @SuppressLint("SetJavaScriptEnabled", "AddJavascriptInterface")
+    @SuppressLint(
+        "SetJavaScriptEnabled",
+        "AddJavascriptInterface"
+    )
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        // Payagan ang chrome://inspect na kumonekta sa debug builds, para
-        // makita mo ang totoong DOM at ma-verify kung dumadating ba ang
-        // keydown/keyup events sa page.
-        if (0 != (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE)) {
+        super.onCreate(savedInstanceState)
+
+        window.addFlags(
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        )
+
+        /*
+         * Enable Chrome remote debugging in debug builds.
+         */
+        if (
+            0 != (
+                applicationInfo.flags and
+                        ApplicationInfo.FLAG_DEBUGGABLE
+                )
+        ) {
             WebView.setWebContentsDebuggingEnabled(true)
         }
 
+        /*
+         * Create WebView.
+         */
         webView = WebView(this)
+
         webView.isFocusable = true
         webView.isFocusableInTouchMode = true
+
         setContentView(webView)
 
+        /*
+         * WebView settings.
+         */
         with(webView.settings) {
+
             javaScriptEnabled = true
+
             domStorageEnabled = true
+
             mediaPlaybackRequiresUserGesture = false
+
             useWideViewPort = true
+
             loadWithOverviewMode = true
-            // Desktop UA para hindi i-redirect ng site sa app store
-            userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
+            /*
+             * Desktop Chrome user agent.
+             */
+            userAgentString =
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+                        "AppleWebKit/537.36 (KHTML, like Gecko) " +
+                        "Chrome/124.0.0.0 Safari/537.36"
         }
 
-        webView.addJavascriptInterface(KeyBridge(), "AndroidKeys")
+        /*
+         * Expose:
+         *
+         * window.AndroidKeys
+         *
+         * to controller.js.
+         */
+        webView.addJavascriptInterface(
+            KeyBridge(),
+            "AndroidKeys"
+        )
+
         webView.webChromeClient = chromeClient
+
         webView.webViewClient = object : WebViewClient() {
-            override fun onPageFinished(view: WebView?, url: String?) {
+
+            override fun onPageFinished(
+                view: WebView?,
+                url: String?
+            ) {
+
                 super.onPageFinished(view, url)
-                val js = assets.open("controller.js").bufferedReader().use { it.readText() }
-                view?.evaluateJavascript(js, null)
+
+                try {
+
+                    val js = assets
+                        .open("controller.js")
+                        .bufferedReader()
+                        .use { it.readText() }
+
+                    view?.evaluateJavascript(
+                        js,
+                        null
+                    )
+
+                } catch (e: Exception) {
+
+                    Log.e(
+                        TAG,
+                        "Failed to load controller.js",
+                        e
+                    )
+                }
             }
         }
 
+        /*
+         * Load Helmet Heroes directly into the WebView.
+         */
         webView.loadUrl(GAME_URL)
-        webView.requestFocus()
+
+        /*
+         * Give the WebView initial focus.
+         */
+        webView.requestFocus(View.FOCUS_DOWN)
     }
 
     @Suppress("DEPRECATION")
     private fun goImmersive() {
-        window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_FULLSCREEN
-                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION)
+
+        window.decorView.systemUiVisibility =
+            View.SYSTEM_UI_FLAG_FULLSCREEN or
+                    View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                    View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                    View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
     }
 
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
+    override fun onWindowFocusChanged(
+        hasFocus: Boolean
+    ) {
+
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) goImmersive()
+
+        if (hasFocus) {
+            goImmersive()
+        }
     }
 
-    override fun onResume() { super.onResume(); webView.onResume() }
-    override fun onPause() { webView.onPause(); super.onPause() }
+    override fun onResume() {
 
-    @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+        super.onResume()
+
+        webView.onResume()
+    }
+
+    override fun onPause() {
+
+        webView.onPause()
+
+        super.onPause()
+    }
+
+    @Suppress(
+        "DEPRECATION",
+        "OVERRIDE_DEPRECATION"
+    )
     override fun onBackPressed() {
-        if (webView.canGoBack()) webView.goBack() else super.onBackPressed()
+
+        if (webView.canGoBack()) {
+
+            webView.goBack()
+
+        } else {
+
+            super.onBackPressed()
+        }
     }
 }
