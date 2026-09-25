@@ -2,6 +2,40 @@
   if (window.__vpad) return;
   window.__vpad = true;
 
+  // ================= DEBUG MODE =================
+  // Ilagay sa 'false' kapag tapos na tayo mag-debug. Habang 'true', may
+  // lalabas na maliit na black log panel sa screen mismo na nagpapakita
+  // ng bawat pindot at kung ano ang nangyari — walang kailangan na
+  // kompyuter, USB debugging, o chrome://inspect.
+  var DEBUG = true;
+  var LOG_LINES = [];
+  var logPanel = null;
+
+  function dlog(msg) {
+    var t = new Date().toISOString().substr(11, 8);
+    LOG_LINES.push('[' + t + '] ' + msg);
+    if (LOG_LINES.length > 60) LOG_LINES.shift();
+    if (logPanel) logPanel.textContent = LOG_LINES.join('\n');
+  }
+
+  // Catch any error anywhere in the page and show it in the panel too —
+  // kung may crash ang page o ibang script, makikita mo agad.
+  window.addEventListener('error', function (e) {
+    dlog('PAGE ERROR: ' + e.message + ' @ ' + e.filename + ':' + e.lineno);
+  });
+
+  // Global listener na nakikita ANG LAHAT ng keydown/keyup na dumarating sa
+  // window, kahit saan pa galing — totoong keyboard, synthetic JS, o
+  // Android native. Ito ang pinaka-importanteng linya: sinasabi nito kung
+  // "totoo" (isTrusted:true) o "peke/JS-made" (isTrusted:false) ang event,
+  // dahil maraming laro ang tumatanggi sa isTrusted:false na events.
+  window.addEventListener('keydown', function (e) {
+    dlog('WINDOW SAW keydown key=' + e.key + ' code=' + e.code + ' isTrusted=' + e.isTrusted);
+  }, true);
+  window.addEventListener('keyup', function (e) {
+    dlog('WINDOW SAW keyup key=' + e.key + ' code=' + e.code + ' isTrusted=' + e.isTrusted);
+  }, true);
+
   var STORE = 'vpad_layout_v3', SET_STORE = 'vpad_settings_v3', HIDE_STORE = 'vpad_hidden_v3';
 
   // ---------- Key table (fallback kung walang Android bridge) ----------
@@ -34,9 +68,6 @@
   var KEY_NAMES = Object.keys(SPECIAL).concat('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.split(''));
 
   // ---------- I-target ang #center na tag ng laro ----------
-  // Ito ang container ng aktwal na laro sa halos lahat ng lumang browser-game
-  // site tulad ng Helmet Heroes. Doon dapat tumutok ang focus/keys, hindi sa
-  // buong page (na maaaring may header, footer, ads).
   var gameTarget = null;
   function findGameTarget() {
     var el = document.getElementById('center');
@@ -55,7 +86,8 @@
 
   function focusGame() {
     gameTarget = findGameTarget();
-    if (!gameTarget) return;
+    if (!gameTarget) { dlog('focusGame: NO TARGET FOUND'); return; }
+    dlog('focusGame: target=' + gameTarget.tagName + (gameTarget.id ? '#' + gameTarget.id : ''));
     try { if (gameTarget.tabIndex == null || gameTarget.tabIndex < 0) gameTarget.tabIndex = 0; } catch (e) {}
     try { gameTarget.focus({ preventScroll: true }); } catch (e) { try { gameTarget.focus(); } catch (e2) {} }
     try {
@@ -75,40 +107,32 @@
       Object.defineProperty(ev, 'which', { get: function () { return info.kc; } });
     } catch (e) {}
     var t = gameTarget || document.activeElement || document;
-    // Kung ang laro ay nasa loob ng same-origin <iframe>, hindi sapat na
-    // i-dispatch lang sa <iframe> element mismo — kailangan itong i-dispatch
-    // sa loob ng document/window ng iframe para marinig ng listeners nito.
     if (t && t.tagName === 'IFRAME') {
       try {
         if (t.contentDocument) t.contentDocument.dispatchEvent(ev);
         if (t.contentWindow) t.contentWindow.dispatchEvent(ev);
       } catch (e) {
-        // Cross-origin iframe — hindi na maaabot ng JS, ang native
-        // AndroidKeys bridge na lang ang pag-asa dito.
+        dlog('fallbackFire: iframe blocked (cross-origin): ' + e.message);
       }
     }
     t.dispatchEvent(ev);
     document.dispatchEvent(ev);
   }
 
-  // Palaging tawagin ANG DALAWA: ang totoong Android key event (kung meron)
-  // AT ang JS-simulated na event. Dati, kapag may AndroidKeys ang bridge,
-  // agad na nagre-`return` bago pa man tumakbo ang fallbackFire — pero
-  // hindi laging maaasahan ang Chromium/WebView sa pag-convert ng
-  // programmatic dispatchKeyEvent() patungong tunay na DOM keydown/keyup,
-  // lalo na para sa character keys (WASD). Kaya ngayon, tumatakbo pareho
-  // ang dalawang paraan sa bawat press, para may backup lagi.
   function sendKey(name, down) {
     var info = keyInfo(name);
-    if (!info) return;
+    if (!info) { dlog('sendKey: unknown key name "' + name + '"'); return; }
+    dlog('sendKey ' + name + ' down=' + down + ' hasAndroidKeys=' + (typeof window.AndroidKeys !== 'undefined'));
     if (down) focusGame();
     try {
       if (typeof window.AndroidKeys !== 'undefined') { window.AndroidKeys.key(name, down); }
-    } catch (e) {}
+    } catch (e) {
+      dlog('AndroidKeys.key threw: ' + e.message);
+    }
     fallbackFire(down ? 'keydown' : 'keyup', info);
   }
 
-  // ---------- Fullscreen (CSS-based, hindi kailanman tumatakip sa overlay) ----------
+  // ---------- Fullscreen (CSS-based) ----------
   var fsEl = null, fsSavedStyle = null, fsSavedOverflow = '';
   function fsEvents() {
     ['fullscreenchange', 'webkitfullscreenchange'].forEach(function (n) { document.dispatchEvent(new Event(n)); });
@@ -201,7 +225,11 @@
     '#vpad-panel label{display:block;margin:8px 0 2px}' +
     '#vpad-panel input[type=text]{width:100%;padding:6px;font-size:16px;border-radius:6px;border:1px solid #666;background:#222;color:#fff}' +
     '#vpad-panel input[type=range]{width:100%}' +
-    '#vpad-panel button{margin:10px 6px 0 0;padding:8px 12px;border-radius:6px;border:1px solid #888;background:#333;color:#fff;font-size:14px}';
+    '#vpad-panel button{margin:10px 6px 0 0;padding:8px 12px;border-radius:6px;border:1px solid #888;background:#333;color:#fff;font-size:14px}' +
+    '#vpad-log{pointer-events:auto;position:absolute;left:4px;bottom:4px;width:min(94vw,520px);height:32vh;' +
+    'background:rgba(0,0,0,.85);color:#0f0;font:10px/1.3 monospace;padding:6px;overflow-y:auto;' +
+    'white-space:pre-wrap;border:1px solid #0f0;border-radius:6px}' +
+    '#vpad-log-bar{pointer-events:auto;position:absolute;left:4px;bottom:4px;display:flex;gap:6px}';
   document.documentElement.appendChild(st);
 
   var root = document.createElement('div');
@@ -209,14 +237,68 @@
   document.documentElement.appendChild(root);
   var btnLayer = document.createElement('div'); root.appendChild(btnLayer);
   var toolLayer = document.createElement('div'); root.appendChild(toolLayer);
+  var debugLayer = document.createElement('div'); root.appendChild(debugLayer);
 
-  // Kapag na-reparent ang <body> o may nag-alis sa root sa DOM (madalas
-  // gawin ng mga lumang game script), ibalik agad ito sa ibabaw.
   setInterval(function () {
     if (!document.documentElement.contains(root) || root.nextSibling || root !== document.documentElement.lastChild) {
       document.documentElement.appendChild(root);
     }
   }, 1000);
+
+  // ---------- Debug panel UI ----------
+  var logVisible = DEBUG;
+  function renderDebug() {
+    debugLayer.innerHTML = '';
+    if (!DEBUG) return;
+
+    var barWrap = document.createElement('div');
+    barWrap.id = 'vpad-log-bar';
+    debugLayer.appendChild(barWrap);
+
+    var toggleBtn = document.createElement('div');
+    toggleBtn.className = 'vpad-tool';
+    toggleBtn.textContent = logVisible ? 'Hide Log' : 'Show Log';
+    toggleBtn.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
+    toggleBtn.addEventListener('click', function (e) {
+      e.stopPropagation(); logVisible = !logVisible; renderDebug();
+    });
+
+    var testBtn = document.createElement('div');
+    testBtn.className = 'vpad-tool';
+    testBtn.textContent = 'TEST W KEY';
+    testBtn.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
+    testBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      dlog('--- TEST: manually firing W down/up ---');
+      sendKey('W', true);
+      setTimeout(function () { sendKey('W', false); }, 150);
+    });
+
+    var clearBtn = document.createElement('div');
+    clearBtn.className = 'vpad-tool';
+    clearBtn.textContent = 'Clear';
+    clearBtn.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
+    clearBtn.addEventListener('click', function (e) {
+      e.stopPropagation(); LOG_LINES = []; if (logPanel) logPanel.textContent = '';
+    });
+
+    if (!logVisible) {
+      barWrap.appendChild(toggleBtn);
+      barWrap.appendChild(testBtn);
+      return;
+    }
+
+    var panel = document.createElement('div');
+    panel.id = 'vpad-log';
+    panel.textContent = LOG_LINES.join('\n');
+    logPanel = panel;
+    debugLayer.appendChild(panel);
+
+    barWrap.style.bottom = 'calc(32vh + 8px)';
+    barWrap.appendChild(toggleBtn);
+    barWrap.appendChild(testBtn);
+    barWrap.appendChild(clearBtn);
+  }
 
   // ---------- Buttons ----------
   function render() {
@@ -396,7 +478,9 @@
     }
   }
 
+  dlog('controller.js loaded. AndroidKeys=' + (typeof window.AndroidKeys));
   focusGame();
   renderTools();
   render();
+  renderDebug();
 })();
